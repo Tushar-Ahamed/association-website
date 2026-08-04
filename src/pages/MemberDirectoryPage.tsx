@@ -18,9 +18,9 @@ export const MemberDirectoryPage: React.FC = () => {
   });
 
   const visibleProfiles = useMemo(() => {
-    // Hide super_admin profiles from public member directory for security
     if (user?.role === 'super_admin') return profiles;
-    return profiles.filter((p) => p.role !== 'super_admin');
+    const nonAdmins = profiles.filter((p) => p.role !== 'super_admin');
+    return nonAdmins.length > 0 ? nonAdmins : profiles;
   }, [profiles, user]);
 
   const filteredMembers = useMemo(() => {

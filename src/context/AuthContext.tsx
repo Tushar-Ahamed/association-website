@@ -191,7 +191,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (!isMounted) return;
 
-        if (dbProf && dbProf.length > 0) setProfiles(dbProf as UserProfile[]);
+        if (dbProf && dbProf.length > 0) {
+          setProfiles((prev) => {
+            const merged = [...(dbProf as UserProfile[])];
+            prev.forEach((p) => {
+              if (!merged.some((m) => m.id === p.id || m.email.toLowerCase() === p.email.toLowerCase())) {
+                merged.push(p);
+              }
+            });
+            return merged;
+          });
+        }
         if (dbComm && dbComm.length > 0) setCommittees(dbComm as Committee[]);
         if (dbCommMem) setCommitteeMembers(dbCommMem as CommitteeMember[]);
         if (dbUpAdmin) setUpazilaAdmins(dbUpAdmin as UpazilaAdminAssignment[]);
