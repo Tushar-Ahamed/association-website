@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, UserPlus, Mail, Lock, User, GraduationCap, Building2, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { X, UserPlus, Mail, Lock, User, GraduationCap, Building2, ShieldAlert, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { UpazilaName, UserRole } from '../../types';
 import { UPAZILA_INFO } from '../../data/mockData';
@@ -20,6 +20,10 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
   const [upazila, setUpazila] = useState<UpazilaName>('jhenaidah_sadar');
   const [department, setDepartment] = useState('');
   const [sessionYears, setSessionYears] = useState('2022-2023');
@@ -37,10 +41,25 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
     e.preventDefault();
     if (!fullNameBn || !email || !department) return;
 
+    if (!password) {
+      setPasswordError('পাসওয়ার্ড প্রদান করুন');
+      return;
+    }
+    if (password.length < 6) {
+      setPasswordError('পাসওয়ার্ড অন্তত ৬ অক্ষরের হতে হবে');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setPasswordError('পাসওয়ার্ড এবং কনফার্ম পাসওয়ার্ড মিলছে না');
+      return;
+    }
+    setPasswordError('');
+
     const res = await register({
       full_name_bn: fullNameBn,
       full_name_en: fullNameEn || fullNameBn,
       email,
+      password,
       phone,
       role,
       upazila,
@@ -196,6 +215,64 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
                 />
               </div>
             </div>
+
+            {/* Password & Confirm Password */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">পাসওয়ার্ড *</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (passwordError) setPasswordError('');
+                    }}
+                    placeholder="পাসওয়ার্ড লিখুন (কমপক্ষে ৬ অক্ষর)"
+                    className="w-full px-3.5 py-2 pr-9 bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-white"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">পাসওয়ার্ড নিশ্চিত করুন *</label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => {
+                      setConfirmPassword(e.target.value);
+                      if (passwordError) setPasswordError('');
+                    }}
+                    placeholder="পাসওয়ার্ড পুনরায় লিখুন"
+                    className="w-full px-3.5 py-2 pr-9 bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-white"
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {passwordError && (
+              <div className="text-red-400 text-[11px] font-medium bg-red-950/50 border border-red-500/30 px-3 py-1.5 rounded-lg flex items-center gap-2">
+                <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                <span>{passwordError}</span>
+              </div>
+            )}
 
             {/* Upazila & Department */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

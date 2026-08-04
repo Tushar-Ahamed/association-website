@@ -56,7 +56,7 @@ interface AuthContextType {
   
   // Auth actions
   login: (email: string, role?: UserRole) => Promise<boolean> | boolean;
-  register: (profileData: Partial<UserProfile>) => Promise<{ success: boolean; message: string }>;
+  register: (profileData: Partial<UserProfile> & { password?: string }) => Promise<{ success: boolean; message: string }>;
   logout: () => void;
   switchRoleDemo: (profileId: string) => void;
   updateProfile: (updatedData: Partial<UserProfile>) => void;
@@ -298,7 +298,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return true;
   };
 
-  const register = async (profileData: Partial<UserProfile>): Promise<{ success: boolean; message: string }> => {
+  const register = async (profileData: Partial<UserProfile> & { password?: string }): Promise<{ success: boolean; message: string }> => {
     const emailLower = (profileData.email || '').trim().toLowerCase();
 
     const existing = profiles.find((p) => p.email?.trim().toLowerCase() === emailLower);
@@ -324,7 +324,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const { data: authData, error: authError } = await supabase.auth.signUp({
           email: profileData.email || '',
-          password: 'Password123!',
+          password: profileData.password || 'Password123!',
           options: {
             data: {
               full_name_bn: profileData.full_name_bn,
