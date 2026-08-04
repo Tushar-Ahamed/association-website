@@ -17,6 +17,14 @@ export const getSupabaseClient = () => {
   return supabase;
 };
 
+function handleSupabaseError(context: string, error: any) {
+  if (error?.message?.includes('Invalid API key') || error?.status === 401) {
+    console.warn(`⚠️ Supabase (${context}): Invalid API key or unauthorized (401). Using local fallback data.`);
+  } else {
+    console.error(`Error fetching ${context} from Supabase:`, error?.message);
+  }
+}
+
 // Database Query Helpers with graceful fallbacks
 export async function dbFetchProfiles() {
   if (!supabase) return null;
@@ -25,7 +33,7 @@ export async function dbFetchProfiles() {
     .select('*')
     .order('created_at', { ascending: false });
   if (error) {
-    console.error('Error fetching profiles from Supabase:', error.message);
+    handleSupabaseError('profiles', error);
     return null;
   }
   return data;
@@ -38,7 +46,7 @@ export async function dbFetchCommittees() {
     .select('*')
     .order('created_at', { ascending: false });
   if (error) {
-    console.error('Error fetching committees from Supabase:', error.message);
+    handleSupabaseError('committees', error);
     return null;
   }
   return data;
@@ -51,7 +59,7 @@ export async function dbFetchCommitteeMembers() {
     .select('*')
     .order('rank_order', { ascending: true });
   if (error) {
-    console.error('Error fetching committee members from Supabase:', error.message);
+    handleSupabaseError('committee members', error);
     return null;
   }
   return data;
@@ -63,7 +71,7 @@ export async function dbFetchUpazilaAdmins() {
     .from('upazila_admin_assignments')
     .select('*');
   if (error) {
-    console.error('Error fetching upazila admin assignments:', error.message);
+    handleSupabaseError('upazila admin assignments', error);
     return null;
   }
   return data;
@@ -77,7 +85,7 @@ export async function dbFetchPosts() {
     .order('is_pinned', { ascending: false })
     .order('created_at', { ascending: false });
   if (error) {
-    console.error('Error fetching posts from Supabase:', error.message);
+    handleSupabaseError('posts', error);
     return null;
   }
   return data;
@@ -91,7 +99,7 @@ export async function dbFetchNotices() {
     .order('is_pinned', { ascending: false })
     .order('created_at', { ascending: false });
   if (error) {
-    console.error('Error fetching notices from Supabase:', error.message);
+    handleSupabaseError('notices', error);
     return null;
   }
   return data;
@@ -104,7 +112,7 @@ export async function dbFetchEvents() {
     .select('*')
     .order('event_date', { ascending: true });
   if (error) {
-    console.error('Error fetching events from Supabase:', error.message);
+    handleSupabaseError('events', error);
     return null;
   }
   return data;
@@ -117,7 +125,7 @@ export async function dbFetchGallery() {
     .select('*')
     .order('created_at', { ascending: false });
   if (error) {
-    console.error('Error fetching gallery from Supabase:', error.message);
+    handleSupabaseError('gallery', error);
     return null;
   }
   return data;
@@ -130,7 +138,7 @@ export async function dbFetchContactMessages() {
     .select('*')
     .order('created_at', { ascending: false });
   if (error) {
-    console.error('Error fetching contact messages from Supabase:', error.message);
+    handleSupabaseError('contact messages', error);
     return null;
   }
   return data;
@@ -143,7 +151,7 @@ export async function dbFetchAuditLogs() {
     .select('*')
     .order('created_at', { ascending: false });
   if (error) {
-    console.error('Error fetching audit logs from Supabase:', error.message);
+    handleSupabaseError('audit logs', error);
     return null;
   }
   return data;
