@@ -1,21 +1,13 @@
 -- ============================================================================
 -- Jhenaidah Zila Somiti - Rajshahi University (RU)
--- Production Supabase Database Schema, Security (RLS), Triggers & RBAC
+-- Production Supabase Database Schema, Security (RLS), Triggers & Initial Seeds
 -- ============================================================================
 
--- 1. EXTENSIONS & CUSTOM ENUMS
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- CUSTOM ENUMS
 DO $$ BEGIN
-  CREATE TYPE user_role AS ENUM (
-    'super_admin',
-    'teacher',
-    'student',
-    'alumni',
-    'upazila_admin',
-    'committee_member',
-    'visitor'
-  );
+  CREATE TYPE user_role AS ENUM ('super_admin', 'teacher', 'student', 'alumni', 'upazila_admin', 'committee_member', 'visitor');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
@@ -23,14 +15,7 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-  CREATE TYPE upazila_name AS ENUM (
-    'jhenaidah_sadar',
-    'kaliganj',
-    'kotchandpur',
-    'maheshpur',
-    'shailkupa',
-    'harinakunda'
-  );
+  CREATE TYPE upazila_name AS ENUM ('jhenaidah_sadar', 'kaliganj', 'kotchandpur', 'maheshpur', 'shailkupa', 'harinakunda');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
@@ -45,9 +30,9 @@ DO $$ BEGIN
   CREATE TYPE notice_category AS ENUM ('general', 'academic', 'event', 'urgent', 'scholarship');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- 2. PROFILES TABLE
+-- 1. PROFILES TABLE
 CREATE TABLE IF NOT EXISTS public.profiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  id TEXT PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   full_name_bn TEXT NOT NULL,
   full_name_en TEXT NOT NULL,
@@ -74,45 +59,45 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. UPAZILA ADMIN ASSIGNMENTS (Max 3 per upazila)
+-- 2. UPAZILA ADMIN ASSIGNMENTS
 CREATE TABLE IF NOT EXISTS public.upazila_admin_assignments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id TEXT NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   upazila upazila_name NOT NULL,
-  assigned_by UUID REFERENCES public.profiles(id),
+  assigned_by TEXT REFERENCES public.profiles(id),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT unique_user_upazila_admin UNIQUE (user_id, upazila)
 );
 
--- 4. COMMITTEES TABLE
+-- 3. COMMITTEES TABLE
 CREATE TABLE IF NOT EXISTS public.committees (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   title_bn TEXT NOT NULL,
   title_en TEXT NOT NULL,
-  term_years TEXT NOT NULL, -- e.g., "2025-2026"
+  term_years TEXT NOT NULL,
   level committee_level NOT NULL DEFAULT 'district',
-  upazila upazila_name, -- NULL for district level
+  upazila upazila_name,
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. COMMITTEE MEMBERS TABLE
+-- 4. COMMITTEE MEMBERS TABLE
 CREATE TABLE IF NOT EXISTS public.committee_members (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  committee_id UUID NOT NULL REFERENCES public.committees(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  position_bn TEXT NOT NULL, -- e.g., 'সভাপতি', 'সাধারণ সম্পাদক'
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  committee_id TEXT NOT NULL REFERENCES public.committees(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  position_bn TEXT NOT NULL,
   position_en TEXT NOT NULL,
   rank_order INTEGER NOT NULL DEFAULT 99,
-  assigned_by UUID REFERENCES public.profiles(id),
+  assigned_by TEXT REFERENCES public.profiles(id),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT unique_committee_user UNIQUE (committee_id, user_id)
 );
 
--- 6. POSTS TABLE (Social Feed)
+-- 5. POSTS TABLE
 CREATE TABLE IF NOT EXISTS public.posts (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  author_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  author_id TEXT NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
   images TEXT[] DEFAULT '{}',
   is_pinned BOOLEAN DEFAULT FALSE,
@@ -120,62 +105,62 @@ CREATE TABLE IF NOT EXISTS public.posts (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 7. POST REACTIONS TABLE
+-- 6. POST REACTIONS TABLE
 CREATE TABLE IF NOT EXISTS public.post_reactions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  post_id UUID NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  post_id TEXT NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   reaction reaction_type NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT unique_post_user_reaction UNIQUE (post_id, user_id)
 );
 
--- 8. POST COMMENTS TABLE
+-- 7. POST COMMENTS TABLE
 CREATE TABLE IF NOT EXISTS public.post_comments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  post_id UUID NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
-  author_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  post_id TEXT NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
+  author_id TEXT NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 9. NOTICES TABLE
+-- 8. NOTICES TABLE
 CREATE TABLE IF NOT EXISTS public.notices (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   title TEXT NOT NULL,
   content TEXT NOT NULL,
   category notice_category NOT NULL DEFAULT 'general',
   file_url TEXT,
   is_pinned BOOLEAN DEFAULT FALSE,
-  published_by UUID REFERENCES public.profiles(id),
+  published_by TEXT REFERENCES public.profiles(id),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 10. EVENTS TABLE
+-- 9. EVENTS TABLE
 CREATE TABLE IF NOT EXISTS public.events (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   title TEXT NOT NULL,
   description TEXT NOT NULL,
   event_date TIMESTAMPTZ NOT NULL,
   location TEXT NOT NULL,
   banner_url TEXT,
-  created_by UUID REFERENCES public.profiles(id),
+  created_by TEXT REFERENCES public.profiles(id),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 11. GALLERY TABLE
+-- 10. GALLERY IMAGES TABLE
 CREATE TABLE IF NOT EXISTS public.gallery_images (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   title TEXT NOT NULL,
   image_url TEXT NOT NULL,
   category TEXT DEFAULT 'General',
-  uploaded_by UUID REFERENCES public.profiles(id),
+  uploaded_by TEXT REFERENCES public.profiles(id),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 12. CONTACT MESSAGES TABLE
+-- 11. CONTACT MESSAGES TABLE
 CREATE TABLE IF NOT EXISTS public.contact_messages (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   name TEXT NOT NULL,
   email TEXT NOT NULL,
   phone TEXT,
@@ -185,19 +170,18 @@ CREATE TABLE IF NOT EXISTS public.contact_messages (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 13. AUDIT & ACTIVITY LOGS TABLE
+-- 12. AUDIT LOGS TABLE
 CREATE TABLE IF NOT EXISTS public.audit_logs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  actor_id UUID REFERENCES public.profiles(id),
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  actor_id TEXT REFERENCES public.profiles(id),
+  actor_name TEXT,
   action TEXT NOT NULL,
   details JSONB,
   ip_address TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ============================================================================
--- INDEXES FOR PERFORMANCE OPTIMIZATION
--- ============================================================================
+-- INDEXES FOR OPTIMIZATION
 CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles(role);
 CREATE INDEX IF NOT EXISTS idx_profiles_upazila ON public.profiles(upazila);
 CREATE INDEX IF NOT EXISTS idx_profiles_status ON public.profiles(account_status);
@@ -209,87 +193,53 @@ CREATE INDEX IF NOT EXISTS idx_post_comments_post ON public.post_comments(post_i
 CREATE INDEX IF NOT EXISTS idx_notices_pinned ON public.notices(is_pinned, created_at DESC);
 
 -- ============================================================================
--- AUTOMATED FUNCTIONS & TRIGGERS
+-- HELPER FUNCTIONS FOR SECURITY & RBAC
 -- ============================================================================
 
--- Function 1: Enforce Max 3 Upazila Admins Per Upazila
-CREATE OR REPLACE FUNCTION check_upazila_admin_limit()
-RETURNS TRIGGER AS $$
-DECLARE
-  admin_count INTEGER;
+-- Helper 1: Check if user is Super Admin
+CREATE OR REPLACE FUNCTION public.is_super_admin(p_user_id TEXT)
+RETURNS BOOLEAN AS $$
 BEGIN
-  SELECT COUNT(*) INTO admin_count
-  FROM public.upazila_admin_assignments
-  WHERE upazila = NEW.upazila;
-
-  IF admin_count >= 3 THEN
-    RAISE EXCEPTION 'Constraint Error: Upazila % already has maximum 3 designated Upazila Admins.', NEW.upazila;
-  END IF;
-
-  RETURN NEW;
+  RETURN EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = p_user_id AND role = 'super_admin' AND account_status = 'approved'
+  );
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
-DROP TRIGGER IF EXISTS trigger_upazila_admin_limit ON public.upazila_admin_assignments;
-CREATE TRIGGER trigger_upazila_admin_limit
-  BEFORE INSERT ON public.upazila_admin_assignments
-  FOR EACH ROW
-  EXECUTE FUNCTION check_upazila_admin_limit();
-
--- Function 2: Enforce Max 3 Super Admin Limit
-CREATE OR REPLACE FUNCTION check_super_admin_limit()
-RETURNS TRIGGER AS $$
-DECLARE
-  super_count INTEGER;
+-- Helper 2: Check if user is Upazila Admin for a specific upazila (Unambiguous parameters)
+CREATE OR REPLACE FUNCTION public.is_upazila_admin_for(p_user_id TEXT, p_target_upazila upazila_name)
+RETURNS BOOLEAN AS $$
 BEGIN
-  IF NEW.role = 'super_admin' AND (OLD.role IS NULL OR OLD.role != 'super_admin') THEN
-    SELECT COUNT(*) INTO super_count
-    FROM public.profiles
-    WHERE role = 'super_admin';
-
-    IF super_count >= 3 THEN
-      RAISE EXCEPTION 'Constraint Error: System allows exactly 3 Super Admin accounts.';
-    END IF;
-  END IF;
-  RETURN NEW;
+  RETURN EXISTS (
+    SELECT 1 FROM public.upazila_admin_assignments
+    WHERE user_id = p_user_id AND upazila = p_target_upazila
+  ) OR EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = p_user_id AND role = 'upazila_admin' AND upazila = p_target_upazila AND account_status = 'approved'
+  );
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
-DROP TRIGGER IF EXISTS trigger_super_admin_limit ON public.profiles;
-CREATE TRIGGER trigger_super_admin_limit
-  BEFORE INSERT OR UPDATE ON public.profiles
-  FOR EACH ROW
-  EXECUTE FUNCTION check_super_admin_limit();
-
--- Function 3: New User Registration & Profile Automation
+-- AUTH TRIGGER
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
   INSERT INTO public.profiles (
-    id,
-    email,
-    full_name_bn,
-    full_name_en,
-    role,
-    account_status,
-    upazila,
-    department,
-    session_years
+    id, email, full_name_bn, full_name_en, role, account_status, upazila, department, session_years
   )
   VALUES (
-    NEW.id,
+    NEW.id::text,
     NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'full_name_bn', NEW.raw_user_meta_data->>'full_name', 'ব্যবহারকারী'),
-    COALESCE(NEW.raw_user_meta_data->>'full_name_en', NEW.raw_user_meta_data->>'full_name', 'User'),
+    COALESCE(NEW.raw_user_meta_data->>'full_name_bn', 'ব্যবহারকারী'),
+    COALESCE(NEW.raw_user_meta_data->>'full_name_en', 'User'),
     COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'student'::user_role),
-    CASE 
-      WHEN (NEW.raw_user_meta_data->>'role') = 'teacher' THEN 'pending'::account_status
-      ELSE 'approved'::account_status
-    END,
+    'approved'::account_status,
     COALESCE((NEW.raw_user_meta_data->>'upazila')::upazila_name, 'jhenaidah_sadar'::upazila_name),
     COALESCE(NEW.raw_user_meta_data->>'department', 'সাধারণ'),
-    COALESCE(NEW.raw_user_meta_data->>'session_years', '2022-2023')
-  );
+    COALESCE(NEW.raw_user_meta_data->>'session_years', '2023-2024')
+  )
+  ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -300,7 +250,7 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- ============================================================================
--- ROW LEVEL SECURITY (RLS) POLICIES
+-- STRICT ROW LEVEL SECURITY (RLS) POLICIES - LEAST PRIVILEGE PRINCIPLE
 -- ============================================================================
 
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -316,71 +266,173 @@ ALTER TABLE public.gallery_images ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.contact_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 
--- Helper Function: Check if user is Super Admin
-CREATE OR REPLACE FUNCTION public.is_super_admin(user_id UUID)
-RETURNS BOOLEAN AS $$
-BEGIN
-  RETURN EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE id = user_id AND role = 'super_admin' AND account_status = 'approved'
+-- 1. PROFILES POLICIES
+DROP POLICY IF EXISTS "Public read approved profiles" ON public.profiles;
+DROP POLICY IF EXISTS "User insert own profile" ON public.profiles;
+DROP POLICY IF EXISTS "User or Admin update profile" ON public.profiles;
+DROP POLICY IF EXISTS "Super Admin delete profile" ON public.profiles;
+
+CREATE POLICY "Public read approved profiles" ON public.profiles
+  FOR SELECT USING (account_status = 'approved' OR auth.uid()::text = id OR public.is_super_admin(auth.uid()::text));
+
+CREATE POLICY "User insert own profile" ON public.profiles
+  FOR INSERT WITH CHECK (auth.uid()::text = id OR public.is_super_admin(auth.uid()::text));
+
+CREATE POLICY "User or Admin update profile" ON public.profiles
+  FOR UPDATE USING (
+    auth.uid()::text = id OR 
+    public.is_super_admin(auth.uid()::text) OR 
+    public.is_upazila_admin_for(auth.uid()::text, upazila)
   );
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Profiles Policies
-CREATE POLICY "Public profiles read access" ON public.profiles
-  FOR SELECT USING (account_status = 'approved');
+CREATE POLICY "Super Admin delete profile" ON public.profiles
+  FOR DELETE USING (public.is_super_admin(auth.uid()::text));
 
-CREATE POLICY "User update own profile" ON public.profiles
-  FOR UPDATE USING (auth.uid() = id);
+-- 2. UPAZILA ADMIN ASSIGNMENTS POLICIES
+DROP POLICY IF EXISTS "Public read upazila admin assignments" ON public.upazila_admin_assignments;
+DROP POLICY IF EXISTS "Super Admin manage upazila admin assignments" ON public.upazila_admin_assignments;
 
-CREATE POLICY "Super admin manage all profiles" ON public.profiles
-  FOR ALL USING (public.is_super_admin(auth.uid()));
-
--- Posts Policies
-CREATE POLICY "Approved members view posts" ON public.posts
+CREATE POLICY "Public read upazila admin assignments" ON public.upazila_admin_assignments
   FOR SELECT USING (true);
 
-CREATE POLICY "Approved members create posts" ON public.posts
-  FOR INSERT WITH CHECK (auth.uid() = author_id);
+CREATE POLICY "Super Admin manage upazila admin assignments" ON public.upazila_admin_assignments
+  FOR ALL USING (public.is_super_admin(auth.uid()::text));
 
-CREATE POLICY "Author edit own posts" ON public.posts
-  FOR UPDATE USING (auth.uid() = author_id);
+-- 3. COMMITTEES POLICIES
+DROP POLICY IF EXISTS "Public read committees" ON public.committees;
+DROP POLICY IF EXISTS "Super Admin manage committees" ON public.committees;
 
-CREATE POLICY "Author or Super Admin delete posts" ON public.posts
-  FOR DELETE USING (auth.uid() = author_id OR public.is_super_admin(auth.uid()));
+CREATE POLICY "Public read committees" ON public.committees
+  FOR SELECT USING (true);
 
--- Notices & Events Policies
-CREATE POLICY "Public read notices" ON public.notices FOR SELECT USING (true);
-CREATE POLICY "Public read events" ON public.events FOR SELECT USING (true);
+CREATE POLICY "Super Admin manage committees" ON public.committees
+  FOR ALL USING (public.is_super_admin(auth.uid()::text));
 
-CREATE POLICY "Super Admin and Teacher publish notices" ON public.notices
-  FOR INSERT WITH CHECK (
-    EXISTS (
+-- 4. COMMITTEE MEMBERS POLICIES
+DROP POLICY IF EXISTS "Public read committee members" ON public.committee_members;
+DROP POLICY IF EXISTS "Super Admin manage committee members" ON public.committee_members;
+
+CREATE POLICY "Public read committee members" ON public.committee_members
+  FOR SELECT USING (true);
+
+CREATE POLICY "Super Admin manage committee members" ON public.committee_members
+  FOR ALL USING (public.is_super_admin(auth.uid()::text));
+
+-- 5. POSTS POLICIES
+DROP POLICY IF EXISTS "Public read posts" ON public.posts;
+DROP POLICY IF EXISTS "Authenticated user create post" ON public.posts;
+DROP POLICY IF EXISTS "Author or Admin update post" ON public.posts;
+DROP POLICY IF EXISTS "Author or Admin delete post" ON public.posts;
+
+CREATE POLICY "Public read posts" ON public.posts
+  FOR SELECT USING (true);
+
+CREATE POLICY "Authenticated user create post" ON public.posts
+  FOR INSERT WITH CHECK (auth.uid()::text = author_id);
+
+CREATE POLICY "Author or Admin update post" ON public.posts
+  FOR UPDATE USING (auth.uid()::text = author_id OR public.is_super_admin(auth.uid()::text));
+
+CREATE POLICY "Author or Admin delete post" ON public.posts
+  FOR DELETE USING (auth.uid()::text = author_id OR public.is_super_admin(auth.uid()::text));
+
+-- 6. POST REACTIONS POLICIES
+DROP POLICY IF EXISTS "Public read reactions" ON public.post_reactions;
+DROP POLICY IF EXISTS "User create reaction" ON public.post_reactions;
+DROP POLICY IF EXISTS "User manage reaction" ON public.post_reactions;
+
+CREATE POLICY "Public read reactions" ON public.post_reactions
+  FOR SELECT USING (true);
+
+CREATE POLICY "User create reaction" ON public.post_reactions
+  FOR INSERT WITH CHECK (auth.uid()::text = user_id);
+
+CREATE POLICY "User manage reaction" ON public.post_reactions
+  FOR ALL USING (auth.uid()::text = user_id OR public.is_super_admin(auth.uid()::text));
+
+-- 7. POST COMMENTS POLICIES
+DROP POLICY IF EXISTS "Public read comments" ON public.post_comments;
+DROP POLICY IF EXISTS "User create comment" ON public.post_comments;
+DROP POLICY IF EXISTS "Author or Admin manage comment" ON public.post_comments;
+
+CREATE POLICY "Public read comments" ON public.post_comments
+  FOR SELECT USING (true);
+
+CREATE POLICY "User create comment" ON public.post_comments
+  FOR INSERT WITH CHECK (auth.uid()::text = author_id);
+
+CREATE POLICY "Author or Admin manage comment" ON public.post_comments
+  FOR ALL USING (auth.uid()::text = author_id OR public.is_super_admin(auth.uid()::text));
+
+-- 8. NOTICES POLICIES
+DROP POLICY IF EXISTS "Public read notices" ON public.notices;
+DROP POLICY IF EXISTS "Super Admin or Teacher manage notices" ON public.notices;
+
+CREATE POLICY "Public read notices" ON public.notices
+  FOR SELECT USING (true);
+
+CREATE POLICY "Super Admin or Teacher manage notices" ON public.notices
+  FOR ALL USING (
+    public.is_super_admin(auth.uid()::text) OR EXISTS (
       SELECT 1 FROM public.profiles 
-      WHERE id = auth.uid() AND role IN ('super_admin', 'teacher') AND account_status = 'approved'
+      WHERE id = auth.uid()::text AND role = 'teacher' AND account_status = 'approved'
     )
   );
 
-CREATE POLICY "Super Admin manage events" ON public.events
-  FOR ALL USING (public.is_super_admin(auth.uid()));
+-- 9. EVENTS POLICIES
+DROP POLICY IF EXISTS "Public read events" ON public.events;
+DROP POLICY IF EXISTS "Super Admin manage events" ON public.events;
 
--- Contact Messages Policies
-CREATE POLICY "Anyone can submit contact message" ON public.contact_messages
+CREATE POLICY "Public read events" ON public.events
+  FOR SELECT USING (true);
+
+CREATE POLICY "Super Admin manage events" ON public.events
+  FOR ALL USING (public.is_super_admin(auth.uid()::text));
+
+-- 10. GALLERY IMAGES POLICIES
+DROP POLICY IF EXISTS "Public read gallery" ON public.gallery_images;
+DROP POLICY IF EXISTS "Super Admin manage gallery" ON public.gallery_images;
+
+CREATE POLICY "Public read gallery" ON public.gallery_images
+  FOR SELECT USING (true);
+
+CREATE POLICY "Super Admin manage gallery" ON public.gallery_images
+  FOR ALL USING (public.is_super_admin(auth.uid()::text));
+
+-- 11. CONTACT MESSAGES POLICIES (Public Insert, Admin View Only)
+DROP POLICY IF EXISTS "Anyone submit contact message" ON public.contact_messages;
+DROP POLICY IF EXISTS "Super Admin manage contact messages" ON public.contact_messages;
+
+CREATE POLICY "Anyone submit contact message" ON public.contact_messages
   FOR INSERT WITH CHECK (true);
 
-CREATE POLICY "Super Admin view contact messages" ON public.contact_messages
-  FOR SELECT USING (public.is_super_admin(auth.uid()));
+CREATE POLICY "Super Admin manage contact messages" ON public.contact_messages
+  FOR ALL USING (public.is_super_admin(auth.uid()::text));
 
--- ============================================================================
--- STORAGE BUCKETS SETUP
--- ============================================================================
-INSERT INTO storage.buckets (id, name, public) 
-VALUES ('avatars', 'avatars', true),
-       ('gallery', 'gallery', true),
-       ('notices', 'notices', true),
-       ('feed_images', 'feed_images', true)
+-- 12. AUDIT LOGS POLICIES (Strict Actor Check / Admin View Only)
+DROP POLICY IF EXISTS "Insert audit log" ON public.audit_logs;
+DROP POLICY IF EXISTS "Super Admin view audit logs" ON public.audit_logs;
+
+CREATE POLICY "Authenticated user insert own audit log" ON public.audit_logs
+  FOR INSERT WITH CHECK (
+    actor_id IS NULL OR actor_id = auth.uid()::text OR public.is_super_admin(auth.uid()::text)
+  );
+
+CREATE POLICY "Super Admin view audit logs" ON public.audit_logs
+  FOR SELECT USING (public.is_super_admin(auth.uid()::text));
+
+-- SEED DATA
+INSERT INTO public.profiles (
+  id, email, full_name_bn, full_name_en, phone, role, account_status, upazila, department, session_years, is_verified
+) VALUES 
+('super-admin-1', 'admin1@jhenaidah-ru.org', 'সেন্ট্রাল এডমিন ১', 'Central Admin 1', '01700000001', 'super_admin', 'approved', 'jhenaidah_sadar', 'সেন্ট্রাল এডমিন', '2020-2021', true),
+('super-admin-2', 'admin2@jhenaidah-ru.org', 'সেন্ট্রাল এডমিন ২', 'Central Admin 2', '01700000002', 'super_admin', 'approved', 'kaliganj', 'সেন্ট্রাল এডমিন', '2020-2021', true),
+('super-admin-3', 'admin3@jhenaidah-ru.org', 'সেন্ট্রাল এডমিন ৩', 'Central Admin 3', '01700000003', 'super_admin', 'approved', 'shailkupa', 'সেন্ট্রাল এডমিন', '2020-2021', true)
 ON CONFLICT (id) DO NOTHING;
 
-CREATE POLICY "Public storage read" ON storage.objects FOR SELECT USING (true);
-CREATE POLICY "Authenticated users upload files" ON storage.objects FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+INSERT INTO public.committees (
+  id, title_bn, title_en, term_years, level, is_active
+) VALUES (
+  'comm-district-2025', 'জেলা কার্যনির্বাহী কমিটি ২০২৫-২০২৬', 'District Executive Committee 2025-2026', '2025-2026', 'district', true
+)
+ON CONFLICT (id) DO NOTHING;

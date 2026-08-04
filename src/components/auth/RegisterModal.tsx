@@ -33,11 +33,11 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullNameBn || !email || !department) return;
 
-    const res = register({
+    const res = await register({
       full_name_bn: fullNameBn,
       full_name_en: fullNameEn || fullNameBn,
       email,

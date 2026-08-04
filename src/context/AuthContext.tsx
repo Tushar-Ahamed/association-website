@@ -26,6 +26,20 @@ import {
   INITIAL_CONTACT_MESSAGES 
 } from '../data/mockData';
 import { useToast } from './ToastContext';
+import { 
+  supabase, 
+  isSupabaseConfigured,
+  dbFetchProfiles,
+  dbFetchCommittees,
+  dbFetchCommitteeMembers,
+  dbFetchUpazilaAdmins,
+  dbFetchPosts,
+  dbFetchNotices,
+  dbFetchEvents,
+  dbFetchGallery,
+  dbFetchContactMessages,
+  dbFetchAuditLogs
+} from '../lib/supabase';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -41,8 +55,8 @@ interface AuthContextType {
   contactMessages: ContactMessage[];
   
   // Auth actions
-  login: (email: string, role?: UserRole) => boolean;
-  register: (profileData: Partial<UserProfile>) => { success: boolean; message: string };
+  login: (email: string, role?: UserRole) => Promise<boolean> | boolean;
+  register: (profileData: Partial<UserProfile>) => Promise<{ success: boolean; message: string }>;
   logout: () => void;
   switchRoleDemo: (profileId: string) => void;
   updateProfile: (updatedData: Partial<UserProfile>) => void;
@@ -76,7 +90,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { showToast } = useToast();
 
-  // Load or initialize state from localStorage (always merging INITIAL_PROFILES for central admins)
+  // Primary state initialized from LocalStorage (for offline cache), updated asynchronously from Supabase
   const [profiles, setProfiles] = useState<UserProfile[]>(() => {
     const saved = localStorage.getItem('jzs_profiles');
     if (!saved) return INITIAL_PROFILES;
@@ -98,7 +112,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const savedId = localStorage.getItem('jzs_current_user_id');
     if (!savedId || savedId === 'visitor') return null;
     const found = profiles.find((p) => p.id === savedId);
-    return found || null; // Start logged out by default for real security
+    return found || null;
   });
 
   const [committees, setCommittees] = useState<Committee[]>(() => {
@@ -146,7 +160,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return saved ? JSON.parse(saved) : INITIAL_CONTACT_MESSAGES;
   });
 
-  // Sync to localStorage
+  // Async load & sync from Supabase when configured
+  useEffect(() => {
+    let isMounted = true;
+    async function syncFromSupabase() {
+      if (!isSupabaseConfigured || !supabase) return;
+      try {
+        const [dbProf, dbComm, dbCommMem, dbUpAdmin, dbPost, dbNot, dbEv, dbGal, dbCont, dbLog] = await Promise.all([
+          dbFetchProfiles(),
+          dbFetchCommittees(),
+          dbFetchCommitteeMembers(),
+          dbFetchUpazilaAdmins(),
+          dbFetchPosts(),
+          dbFetchNotices(),
+          dbFetchEvents(),
+          dbFetchGallery(),
+          dbFetchContactMessages(),
+          dbFetchAuditLogs()
+        ]);
+
+        if (!isMounted) return;
+
+        if (dbProf && dbProf.length > 0) setProfiles(dbProf as UserProfile[]);
+        if (dbComm && dbComm.length > 0) setCommittees(dbComm as Committee[]);
+        if (dbCommMem) setCommitteeMembers(dbCommMem as CommitteeMember[]);
+        if (dbUpAdmin) setUpazilaAdmins(dbUpAdmin as UpazilaAdminAssignment[]);
+        if (dbPost && dbPost.length > 0) setPosts(dbPost as Post[]);
+        if (dbNot && dbNot.length > 0) setNotices(dbNot as Notice[]);
+        if (dbEv && dbEv.length > 0) setEvents(dbEv as EventItem[]);
+        if (dbGal) setGallery(dbGal as GalleryItem[]);
+        if (dbCont) setContactMessages(dbCont as ContactMessage[]);
+        if (dbLog && dbLog.length > 0) setAuditLogs(dbLog as AuditLog[]);
+      } catch (err) {
+        console.error('Supabase initial fetch warning:', err);
+      }
+    }
+    syncFromSupabase();
+    return () => { isMounted = false; };
+  }, []);
+
+  // Sync state to local storage cache
   useEffect(() => {
     localStorage.setItem('jzs_profiles', JSON.stringify(profiles));
   }, [profiles]);
@@ -202,11 +255,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       created_at: new Date().toISOString()
     };
     setAuditLogs((prev) => [newLog, ...prev]);
+
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('audit_logs').insert([newLog]).then();
+    }
   };
 
-  const login = (email: string): boolean => {
+  const login = async (email: string): Promise<boolean> => {
     const cleanEmail = email.trim().toLowerCase();
     let found = profiles.find((p) => p.email.trim().toLowerCase() === cleanEmail);
+
+    if (!found && isSupabaseConfigured && supabase) {
+      try {
+        const { data } = await supabase.from('profiles').select('*').eq('email', cleanEmail).maybeSingle();
+        if (data) {
+          found = data as UserProfile;
+          setProfiles((prev) => [found!, ...prev]);
+        }
+      } catch (err) {
+        console.error('Error querying profile from Supabase on login:', err);
+      }
+    }
     
     if (!found) {
       found = INITIAL_PROFILES.find((p) => p.email.trim().toLowerCase() === cleanEmail);
@@ -229,7 +298,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return true;
   };
 
-  const register = (profileData: Partial<UserProfile>): { success: boolean; message: string } => {
+  const register = async (profileData: Partial<UserProfile>): Promise<{ success: boolean; message: string }> => {
     const emailLower = (profileData.email || '').trim().toLowerCase();
 
     const existing = profiles.find((p) => p.email?.trim().toLowerCase() === emailLower);
@@ -248,8 +317,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const assignedRole = isSuperAdminEmail ? 'super_admin' : (profileData.role || 'student');
     const assignedStatus = isSuperAdminEmail ? 'approved' : (isTeacher ? 'pending' : 'approved');
 
+    let generatedId = isSuperAdminEmail ? `super-admin-${Date.now()}` : 'user-' + Date.now();
+
+    // Supabase Auth Integration
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: profileData.email || '',
+          password: 'Password123!',
+          options: {
+            data: {
+              full_name_bn: profileData.full_name_bn,
+              full_name_en: profileData.full_name_en,
+              role: assignedRole,
+              upazila: profileData.upazila,
+              department: profileData.department,
+              session_years: profileData.session_years
+            }
+          }
+        });
+        if (!authError && authData.user?.id) {
+          generatedId = authData.user.id;
+        }
+      } catch (e) {
+        console.warn('Supabase Auth warning during signup:', e);
+      }
+    }
+
     const newProfile: UserProfile = {
-      id: isSuperAdminEmail ? `super-admin-${Date.now()}` : 'user-' + Date.now(),
+      id: generatedId,
       email: profileData.email || '',
       full_name_bn: profileData.full_name_bn || 'নতুন ব্যবহারকারী',
       full_name_en: profileData.full_name_en || 'New User',
@@ -276,6 +372,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setProfiles((prev) => [newProfile, ...prev]);
 
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('profiles').upsert(newProfile).then();
+    }
+
     if (assignedStatus === 'approved') {
       setCurrentUser(newProfile);
       showToast('success', isSuperAdminEmail ? 'সুপার এডমিন অ্যাকাউন্ট সক্রিয়' : 'নিবন্ধন সফল', 
@@ -296,6 +396,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = () => {
     setCurrentUser(null);
+    if (isSupabaseConfigured && supabase) {
+      supabase.auth.signOut().then();
+    }
     showToast('info', 'লগআউট সম্পন্ন', 'আপনি সফলভাবে লগআউট করেছেন।');
   };
 
@@ -317,6 +420,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updated = { ...currentUser, ...updatedData, updated_at: new Date().toISOString() };
     setCurrentUser(updated);
     setProfiles((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('profiles').update(updatedData).eq('id', currentUser.id).then();
+    }
+
     showToast('success', 'প্রোফাইল আপডেট', 'আপনার প্রোফাইল তথ্য সফলভাবে সংরক্ষণ করা হয়েছে।');
   };
 
@@ -324,6 +432,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfiles((prev) =>
       prev.map((p) => (p.id === teacherId ? { ...p, account_status: 'approved' as const } : p))
     );
+
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('profiles').update({ account_status: 'approved' }).eq('id', teacherId).then();
+    }
+
     showToast('success', 'অনুমোদন প্রদান', 'শিক্ষক অ্যাকাউন্টটি সফলভাবে অনুমোদন দেওয়া হলো।');
     addAuditLog('TEACHER_APPROVE', { teacher_id: teacherId });
   };
@@ -332,12 +445,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfiles((prev) =>
       prev.map((p) => (p.id === teacherId ? { ...p, account_status: 'rejected' as const } : p))
     );
+
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('profiles').update({ account_status: 'rejected' }).eq('id', teacherId).then();
+    }
+
     showToast('warning', 'অনুমোদন প্রত্যাখ্যান', 'শিক্ষক আবেদনটি প্রত্যাখ্যান করা হয়েছে।');
     addAuditLog('TEACHER_REJECT', { teacher_id: teacherId });
   };
 
   const assignUpazilaAdmin = (userId: string, upazila: UpazilaName): { success: boolean; message: string } => {
-    // Check max 3 upazila admin limit for this upazila
     const currentCount = upazilaAdmins.filter((ua) => ua.upazila === upazila).length;
     if (currentCount >= 3) {
       return { success: false, message: `নিরাপত্তা নিয়ম: এই উপজেলায় ইতিমধ্যে সর্বোচ্চ ৩ জন উপজেলা এডমিন বিদ্যমান!` };
@@ -360,12 +477,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       profile: targetUser
     };
 
-    // Update user role to upazila_admin
     setProfiles((prev) =>
       prev.map((p) => (p.id === userId ? { ...p, role: 'upazila_admin' as const } : p))
     );
 
     setUpazilaAdmins((prev) => [...prev, newAssignment]);
+
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('upazila_admin_assignments').insert([{
+        user_id: userId,
+        upazila,
+        assigned_by: currentUser?.id
+      }]).then();
+      supabase.from('profiles').update({ role: 'upazila_admin' }).eq('id', userId).then();
+    }
+
     showToast('success', 'উপজেলা এডমিন নিয়োগ', `${targetUser.full_name_bn}-কে উপজেলা এডমিন পদে নিয়োগ দেওয়া হয়েছে।`);
     addAuditLog('UPAZILA_ADMIN_ASSIGN', { user_id: userId, upazila });
     return { success: true, message: 'উপজেলা এডমিন সফলভাবে নিয়োগ দেওয়া হয়েছে।' };
@@ -378,6 +504,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setProfiles((prev) =>
         prev.map((p) => (p.id === target.user_id ? { ...p, role: 'student' as const } : p))
       );
+
+      if (isSupabaseConfigured && supabase) {
+        supabase.from('upazila_admin_assignments').delete().eq('id', assignmentId).then();
+        supabase.from('profiles').update({ role: 'student' }).eq('id', target.user_id).then();
+      }
+
       showToast('info', 'উপজেলা এডমিন অপসারণ', 'উপজেলা এডমিন পদবী বাতিল করা হয়েছে।');
       addAuditLog('UPAZILA_ADMIN_REMOVE', { assignment_id: assignmentId });
     }
@@ -410,6 +542,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       prev.map((p) => (p.id === userId && p.role !== 'super_admin' ? { ...p, role: 'committee_member' as const } : p))
     );
 
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('committee_members').insert([{
+        committee_id: committeeId,
+        user_id: userId,
+        position_bn: positionBn,
+        position_en: positionEn,
+        rank_order: rankOrder,
+        assigned_by: currentUser?.id
+      }]).then();
+    }
+
     showToast('success', 'কমিটি পদবি বরাদ্দ', `${targetUser.full_name_bn}-কে ${positionBn} পদবি দেওয়া হয়েছে।`);
     addAuditLog('COMMITTEE_MEMBER_ASSIGN', { committee_id: committeeId, user_id: userId, position: positionBn });
     return { success: true, message: 'কমিটিতে সদস্য পদ যুক্ত করা হয়েছে।' };
@@ -417,6 +560,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const removeCommitteeMember = (memberId: string) => {
     setCommitteeMembers((prev) => prev.filter((cm) => cm.id !== memberId));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('committee_members').delete().eq('id', memberId).then();
+    }
     showToast('info', 'কমিটি সদস্য অপসারিত', 'কমিটি পদবি থেকে অপসারণ করা হয়েছে।');
   };
 
@@ -434,6 +580,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       comments: []
     };
     setPosts((prev) => [newPost, ...prev]);
+
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('posts').insert([{
+        author_id: currentUser.id,
+        content,
+        images
+      }]).then();
+    }
+
     showToast('success', 'পোস্ট প্রকাশিত', 'আপনার পোস্টটি সামাজিক ফিডে যুক্ত হয়েছে।');
   };
 
@@ -451,19 +606,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         let newReactions = [...currentReactions];
         if (existingIdx >= 0) {
           if (newReactions[existingIdx].reaction === reaction) {
-            newReactions.splice(existingIdx, 1); // remove
+            newReactions.splice(existingIdx, 1);
+            if (isSupabaseConfigured && supabase) {
+              supabase.from('post_reactions').delete().eq('post_id', postId).eq('user_id', currentUser.id).then();
+            }
           } else {
-            newReactions[existingIdx].reaction = reaction; // update
+            newReactions[existingIdx].reaction = reaction;
+            if (isSupabaseConfigured && supabase) {
+              supabase.from('post_reactions').update({ reaction }).eq('post_id', postId).eq('user_id', currentUser.id).then();
+            }
           }
         } else {
-          newReactions.push({
+          const newRec = {
             id: 'r-' + Date.now(),
             post_id: postId,
             user_id: currentUser.id,
             reaction,
             created_at: new Date().toISOString(),
             profile: currentUser
-          });
+          };
+          newReactions.push(newRec);
+          if (isSupabaseConfigured && supabase) {
+            supabase.from('post_reactions').insert([{
+              post_id: postId,
+              user_id: currentUser.id,
+              reaction
+            }]).then();
+          }
         }
         return { ...p, reactions: newReactions };
       })
@@ -475,23 +644,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       showToast('warning', 'লগইন প্রয়োজন', 'মতামত বা কমেন্ট করতে দয়া করে লগইন করুন।');
       return;
     }
+    const newComment = {
+      id: 'c-' + Date.now(),
+      post_id: postId,
+      author_id: currentUser.id,
+      content,
+      created_at: new Date().toISOString(),
+      author: currentUser
+    };
+
     setPosts((prev) =>
       prev.map((p) => {
         if (p.id !== postId) return p;
-        const newComments = [
-          ...(p.comments || []),
-          {
-            id: 'c-' + Date.now(),
-            post_id: postId,
-            author_id: currentUser.id,
-            content,
-            created_at: new Date().toISOString(),
-            author: currentUser
-          }
-        ];
-        return { ...p, comments: newComments };
+        return { ...p, comments: [...(p.comments || []), newComment] };
       })
     );
+
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('post_comments').insert([{
+        post_id: postId,
+        author_id: currentUser.id,
+        content
+      }]).then();
+    }
+
     showToast('success', 'কমেন্ট যুক্ত হয়েছে', 'আপনার মন্তব্য প্রকাশিত হয়েছে।');
   };
 
@@ -509,12 +685,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       publisher: currentUser
     };
     setNotices((prev) => [newNotice, ...prev]);
+
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('notices').insert([{
+        title,
+        content,
+        category,
+        file_url: fileUrl,
+        is_pinned: isPinned,
+        published_by: currentUser.id
+      }]).then();
+    }
+
     showToast('success', 'নোটিশ প্রকাশিত', 'নতুন নোটিশ সফলভাবে বোর্ডে যুক্ত হয়েছে।');
     addAuditLog('NOTICE_CREATE', { title, category });
   };
 
   const deleteNotice = (noticeId: string) => {
     setNotices((prev) => prev.filter((n) => n.id !== noticeId));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('notices').delete().eq('id', noticeId).then();
+    }
     showToast('info', 'নোটিশ মোছা হয়েছে', 'নোটিশটি সফলভাবে সিস্টেম থেকে মুছে ফেলা হয়েছে।');
     addAuditLog('NOTICE_DELETE', { notice_id: noticeId });
   };
@@ -533,11 +724,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       creator: currentUser
     };
     setEvents((prev) => [newEvent, ...prev]);
+
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('events').insert([{
+        title,
+        description,
+        event_date: date,
+        location,
+        banner_url: bannerUrl,
+        created_by: currentUser.id
+      }]).then();
+    }
+
     showToast('success', 'ইভেন্ট প্রকাশিত', 'নতুন ইভেন্ট সফলভাবে প্রকাশ করা হয়েছে।');
   };
 
   const deleteEvent = (eventId: string) => {
     setEvents((prev) => prev.filter((e) => e.id !== eventId));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('events').delete().eq('id', eventId).then();
+    }
     showToast('info', 'ইভেন্ট মোছা হয়েছে', 'ইভেন্টটি সফলভাবে সিস্টেম থেকে মুছে ফেলা হয়েছে।');
     addAuditLog('EVENT_DELETE', { event_id: eventId });
   };
@@ -553,12 +759,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       created_at: new Date().toISOString()
     };
     setGallery((prev) => [newItem, ...prev]);
+
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('gallery_images').insert([{
+        title,
+        image_url: imageUrl,
+        category,
+        uploaded_by: currentUser.id
+      }]).then();
+    }
+
     showToast('success', 'ছবি প্রকাশ সম্পন্ন', 'নতুন আলোকচিত্র সফলভাবে গ্যালারিতে প্রকাশ করা হয়েছে।');
     addAuditLog('GALLERY_ADD', { title, category });
   };
 
   const deleteGalleryItem = (itemId: string) => {
     setGallery((prev) => prev.filter((g) => g.id !== itemId));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('gallery_images').delete().eq('id', itemId).then();
+    }
     showToast('info', 'ছবি মোছা হয়েছে', 'ছবিটি গ্যালারি থেকে অপসারণ করা হয়েছে।');
     addAuditLog('GALLERY_DELETE', { item_id: itemId });
   };
@@ -575,6 +794,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       created_at: new Date().toISOString()
     };
     setContactMessages((prev) => [newMessage, ...prev]);
+
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('contact_messages').insert([{
+        name,
+        email,
+        phone,
+        subject,
+        message
+      }]).then();
+    }
+
     showToast('success', 'বার্তা প্রেরিত', 'আপনার বার্তা সফলভাবে এডমিন কর্তৃপক্ষের কাছে পাঠানো হয়েছে। ধন্যবাদ!');
   };
 
@@ -582,6 +812,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setContactMessages((prev) =>
       prev.map((m) => (m.id === messageId ? { ...m, is_read: true } : m))
     );
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('contact_messages').update({ is_read: true }).eq('id', messageId).then();
+    }
   };
 
   return (
