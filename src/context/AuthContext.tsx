@@ -209,48 +209,122 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => { isMounted = false; };
   }, []);
 
+  // Helper to resolve or construct a valid UserProfile for any authenticated user
+  const resolveUserProfile = async (authUser: any): Promise<UserProfile | null> => {
+    if (!authUser) return null;
+    const userEmail = (authUser.email || '').toLowerCase();
+    const userId = authUser.id;
+
+    // 1. Search in current profiles list
+    let found = profiles.find((p) => p.id === userId || p.email.toLowerCase() === userEmail);
+    if (found) return found;
+
+    // 2. Search in INITIAL_PROFILES
+    found = INITIAL_PROFILES.find((p) => p.id === userId || p.email.toLowerCase() === userEmail);
+    if (found) return found;
+
+    // 3. Query Supabase profiles table
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: dbProf } = await supabase
+          .from('profiles')
+          .select('*')
+          .or(`id.eq.${userId},email.eq.${userEmail}`)
+          .maybeSingle();
+
+        if (dbProf) {
+          const profile = dbProf as UserProfile;
+          setProfiles((prev) => {
+            if (prev.some((p) => p.id === profile.id)) return prev;
+            return [profile, ...prev];
+          });
+          return profile;
+        }
+      } catch (err) {
+        console.warn('⚠️ [Auth Debug] Error fetching profile from Supabase table:', err);
+      }
+    }
+
+    // 4. Fallback profile from authUser metadata
+    const metadata = authUser.user_metadata || {};
+    const fallbackProfile: UserProfile = {
+      id: userId,
+      email: userEmail,
+      full_name_bn: metadata.full_name_bn || metadata.full_name || 'নিবন্ধিত সদস্য',
+      full_name_en: metadata.full_name_en || 'Registered Member',
+      phone: metadata.phone || '',
+      avatar_url: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(userEmail || 'User')}`,
+      role: metadata.role || 'student',
+      account_status: 'approved',
+      upazila: metadata.upazila || 'jhenaidah_sadar',
+      department: metadata.department || 'সাধারণ',
+      session_years: metadata.session_years || '2023-2024',
+      is_verified: true,
+      created_at: authUser.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    setProfiles((prev) => [fallbackProfile, ...prev]);
+    return fallbackProfile;
+  };
+
   // Supabase Auth session restoration and state synchronization listener
   useEffect(() => {
     let isMounted = true;
 
     const initializeAuthSession = async () => {
-      try {
-        if (isSupabaseConfigured && supabase) {
-          const { data: { session } } = await supabase.auth.getSession();
+      console.log('🔍 [Auth Debug] Starting initializeAuthSession()...');
+      let activeUser: UserProfile | null = null;
+
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
+          console.log('🔑 [Auth Debug] getSession() result:', { session, error: sessionErr });
+
+          const sbAuthTokens = Object.keys(localStorage).filter(
+            (k) => k.startsWith('sb-') || k.includes('auth-token')
+          );
+          console.log('📦 [Auth Debug] LocalStorage Supabase Auth tokens present:', sbAuthTokens);
+
           if (session?.user && isMounted) {
-            const userEmail = session.user.email?.toLowerCase();
-            const userId = session.user.id;
+            activeUser = await resolveUserProfile(session.user);
+            console.log('✅ [Auth Debug] Session successfully restored from Supabase Auth:', activeUser?.email);
+          }
+        } catch (error) {
+          console.warn('⚠️ [Auth Debug] Error during getSession():', error);
+        }
+      }
 
-            let matchingProfile = profiles.find(
-              (p) => p.id === userId || p.email.toLowerCase() === userEmail
-            );
-
-            if (!matchingProfile) {
-              const { data: dbProf } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('email', userEmail)
-                .maybeSingle();
-
-              if (dbProf && isMounted) {
-                matchingProfile = dbProf as UserProfile;
-                setProfiles((prev) => [matchingProfile!, ...prev]);
+      // Fallback: Restore cached user from LocalStorage if no Supabase session returned
+      if (!activeUser && isMounted) {
+        try {
+          const cachedUserJson = localStorage.getItem('jzs_current_user_data');
+          if (cachedUserJson) {
+            activeUser = JSON.parse(cachedUserJson);
+            console.log('✅ [Auth Debug] Session restored from LocalStorage cached user:', activeUser?.email);
+          } else {
+            const savedId = localStorage.getItem('jzs_current_user_id');
+            if (savedId && savedId !== 'visitor') {
+              const found = INITIAL_PROFILES.find((p) => p.id === savedId);
+              if (found) {
+                activeUser = found;
+                console.log('✅ [Auth Debug] Session restored from initial profiles ID:', activeUser?.email);
               }
             }
-
-            if (matchingProfile && isMounted) {
-              setCurrentUser(matchingProfile);
-              localStorage.setItem('jzs_current_user_id', matchingProfile.id);
-              localStorage.setItem('jzs_current_user_data', JSON.stringify(matchingProfile));
-            }
           }
+        } catch (e) {
+          console.warn('⚠️ [Auth Debug] Error parsing cached user data:', e);
         }
-      } catch (error) {
-        console.warn('Auth session initialization notice:', error);
-      } finally {
-        if (isMounted) {
-          setIsAuthLoading(false);
+      }
+
+      if (isMounted) {
+        if (activeUser) {
+          setCurrentUser(activeUser);
+          localStorage.setItem('jzs_current_user_id', activeUser.id);
+          localStorage.setItem('jzs_current_user_data', JSON.stringify(activeUser));
         }
+        setIsAuthLoading(false);
+        console.log('🎉 [Auth Debug] initializeAuthSession() completed. Final user state:', activeUser?.email || 'Guest / Unauthenticated');
       }
     };
 
@@ -259,33 +333,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (isSupabaseConfigured && supabase) {
       const client = supabase;
       const { data: authListener } = client.auth.onAuthStateChange(async (event, session) => {
+        console.log(`⚡ [Auth Debug] onAuthStateChange event received: "${event}"`, session);
+
         if (!isMounted) return;
 
         if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
           if (session?.user) {
-            const userEmail = session.user.email?.toLowerCase();
-            const userId = session.user.id;
-            let matchingProfile = profiles.find(
-              (p) => p.id === userId || p.email.toLowerCase() === userEmail
-            );
-            if (!matchingProfile) {
-              const { data: dbProf } = await client
-                .from('profiles')
-                .select('*')
-                .eq('email', userEmail)
-                .maybeSingle();
-              if (dbProf && isMounted) {
-                matchingProfile = dbProf as UserProfile;
-                setProfiles((prev) => [matchingProfile!, ...prev]);
-              }
-            }
-            if (matchingProfile && isMounted) {
-              setCurrentUser(matchingProfile);
-              localStorage.setItem('jzs_current_user_id', matchingProfile.id);
-              localStorage.setItem('jzs_current_user_data', JSON.stringify(matchingProfile));
+            const resolvedUser = await resolveUserProfile(session.user);
+            if (resolvedUser && isMounted) {
+              console.log(`✅ [Auth Debug] User state synchronized on "${event}":`, resolvedUser.email);
+              setCurrentUser(resolvedUser);
+              localStorage.setItem('jzs_current_user_id', resolvedUser.id);
+              localStorage.setItem('jzs_current_user_data', JSON.stringify(resolvedUser));
             }
           }
         } else if (event === 'SIGNED_OUT') {
+          console.log('🚪 [Auth Debug] SIGNED_OUT event triggered. Clearing auth state.');
           setCurrentUser(null);
           localStorage.removeItem('jzs_current_user_id');
           localStorage.removeItem('jzs_current_user_data');
@@ -303,19 +366,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // Sync state to local storage cache (only after auth initialization completes)
+  // Sync profiles to local storage cache
   useEffect(() => {
     localStorage.setItem('jzs_profiles', JSON.stringify(profiles));
   }, [profiles]);
 
+  // Sync currentUser to local storage cache (never clear here; clearing only happens in explicit logout)
   useEffect(() => {
     if (isAuthLoading) return;
     if (currentUser) {
       localStorage.setItem('jzs_current_user_id', currentUser.id);
       localStorage.setItem('jzs_current_user_data', JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem('jzs_current_user_id');
-      localStorage.removeItem('jzs_current_user_data');
     }
   }, [currentUser, isAuthLoading]);
 
