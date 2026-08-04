@@ -517,9 +517,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Supabase Auth Integration
     if (isSupabaseConfigured && supabase) {
       try {
+        const userPassword = profileData.password || 'Password123!';
         const { data: authData, error: authError } = await supabase.auth.signUp({
           email: profileData.email || '',
-          password: profileData.password || 'Password123!',
+          password: userPassword,
           options: {
             data: {
               full_name_bn: profileData.full_name_bn,
@@ -533,6 +534,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
         if (!authError && authData.user?.id) {
           generatedId = authData.user.id;
+        }
+
+        // Establish active session if not auto-signed-in (enables RLS check auth.uid())
+        if (!authData.session) {
+          await supabase.auth.signInWithPassword({
+            email: profileData.email || '',
+            password: userPassword
+          });
         }
       } catch (e) {
         console.warn('Supabase Auth warning during signup:', e);
@@ -565,18 +574,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: new Date().toISOString()
     };
 
-    setProfiles((prev) => [newProfile, ...prev]);
+    setProfiles((prev) => [newProfile, ...prev.filter((p) => p.id !== newProfile.id)]);
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const { error: dbErr } = await supabase.from('profiles').upsert(newProfile);
+        const { error: dbErr } = await supabase.from('profiles').upsert(newProfile, { onConflict: 'id' });
         if (dbErr) {
           console.error('❌ Supabase profile insertion error:', dbErr.message);
         } else {
-          console.log('✅ Supabase profile saved to cloud database:', newProfile.email);
+          console.log('✅ Supabase profile successfully saved to cloud DB:', newProfile.email);
         }
       } catch (err) {
-        console.error('❌ Exception inserting profile into Supabase:', err);
+        console.error('❌ Exception inserting profile into Supabase DB:', err);
       }
     }
 
