@@ -568,7 +568,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfiles((prev) => [newProfile, ...prev]);
 
     if (isSupabaseConfigured && supabase) {
-      supabase.from('profiles').upsert(newProfile).then();
+      try {
+        const { error: dbErr } = await supabase.from('profiles').upsert(newProfile);
+        if (dbErr) {
+          console.error('❌ Supabase profile insertion error:', dbErr.message);
+        } else {
+          console.log('✅ Supabase profile saved to cloud database:', newProfile.email);
+        }
+      } catch (err) {
+        console.error('❌ Exception inserting profile into Supabase:', err);
+      }
     }
 
     if (assignedStatus === 'approved') {
