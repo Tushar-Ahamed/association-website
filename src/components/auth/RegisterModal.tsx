@@ -165,7 +165,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
                   setFullNameBn(e.target.value);
                   setFullNameEn(e.target.value);
                 }}
-                placeholder="বাংলা বা ইংরেজিতে আপনার নাম লিখুন (e.g. Md. Tushar Ahammed / মো: তুশার আহাম্মেদ)"
+                placeholder=""
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs"
               />
             </div>
