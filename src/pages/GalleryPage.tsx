@@ -1,9 +1,12 @@
 import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import { validateSelectedFile, ALLOWED_IMAGE_TYPES } from '../utils/fileValidation';
 import { Image, Plus, Trash2, X, UploadCloud } from 'lucide-react';
 
 export const GalleryPage: React.FC = () => {
   const { user, gallery, addGalleryItem, deleteGalleryItem } = useAuth();
+  const { showToast } = useToast();
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -24,6 +27,16 @@ export const GalleryPage: React.FC = () => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      const validation = validateSelectedFile(file, {
+        maxSizeMB: 2,
+        allowedTypes: ALLOWED_IMAGE_TYPES
+      });
+      if (!validation.valid) {
+        showToast('error', 'গ্যালারি ছবি ত্রুটি', validation.errorMessage || 'ছবিটির আকার সর্বোচ্চ 2 MB এবং JPG, PNG, WEBP হওয়া আবশ্যক।');
+        if (e.target) e.target.value = '';
+        return;
+      }
+
       const reader = new FileReader();
       reader.onloadend = () => {
         if (reader.result) {
@@ -166,7 +179,7 @@ export const GalleryPage: React.FC = () => {
                   <input
                     type="file"
                     ref={fileInputRef}
-                    accept="image/*"
+                    accept="image/jpeg,image/jpg,image/png,image/webp"
                     onChange={handleFileChange}
                     className="hidden"
                   />

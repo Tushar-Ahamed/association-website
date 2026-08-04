@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import { validateSelectedFile, ALLOWED_IMAGE_TYPES } from '../utils/fileValidation';
 import { User, Mail, Phone, MapPin, GraduationCap, Building2, Save, ShieldCheck, Camera, Sparkles, Award, Briefcase, Heart, UploadCloud } from 'lucide-react';
 import { UpazilaName } from '../types';
 import { UPAZILA_INFO } from '../data/mockData';
@@ -7,6 +9,7 @@ import { RU_HALLS, RU_DEPARTMENTS } from '../data/ruData';
 
 export const ProfilePage: React.FC = () => {
   const { user, updateProfile } = useAuth();
+  const { showToast } = useToast();
 
   if (!user) {
     return (
@@ -286,10 +289,19 @@ export const ProfilePage: React.FC = () => {
                   <input
                     type="file"
                     id="profileAvatarPicker"
-                    accept="image/*"
+                    accept="image/jpeg,image/jpg,image/png,image/webp"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) {
+                        const validation = validateSelectedFile(file, {
+                          maxSizeMB: 0.488, // 500 KB
+                          allowedTypes: ALLOWED_IMAGE_TYPES
+                        });
+                        if (!validation.valid) {
+                          showToast('error', 'প্রোফাইল ছবি আপলোড ব্যর্থ', validation.errorMessage || 'ফাইলটি সর্বোচ্চ ৫০০ KB এবং JPG, PNG, WEBP হওয়া আবশ্যক।');
+                          if (e.target) e.target.value = '';
+                          return;
+                        }
                         const reader = new FileReader();
                         reader.onloadend = () => {
                           if (reader.result) {

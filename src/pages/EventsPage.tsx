@@ -1,9 +1,12 @@
 import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import { validateSelectedFile, ALLOWED_IMAGE_TYPES } from '../utils/fileValidation';
 import { Calendar, MapPin, Plus, X, Sparkles, CheckCircle2, Trash2, UploadCloud } from 'lucide-react';
 
 export const EventsPage: React.FC = () => {
   const { user, events, createEvent, deleteEvent } = useAuth();
+  const { showToast } = useToast();
   const [modalOpen, setModalOpen] = useState(false);
   const [registeredEvents, setRegisteredEvents] = useState<Record<string, boolean>>({});
 
@@ -19,6 +22,16 @@ export const EventsPage: React.FC = () => {
   const handleBannerSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      const validation = validateSelectedFile(file, {
+        maxSizeMB: 3,
+        allowedTypes: ALLOWED_IMAGE_TYPES
+      });
+      if (!validation.valid) {
+        showToast('error', 'ইভেন্ট ব্যানার ত্রুটি', validation.errorMessage || 'ব্যনার ছবিটির সর্বোচ্চ আকার 3 MB এবং JPG, PNG, WEBP হতে হবে।');
+        if (e.target) e.target.value = '';
+        return;
+      }
+
       const reader = new FileReader();
       reader.onloadend = () => {
         if (reader.result) {
@@ -207,7 +220,7 @@ export const EventsPage: React.FC = () => {
                   <input
                     type="file"
                     ref={fileInputRef}
-                    accept="image/*"
+                    accept="image/jpeg,image/jpg,image/png,image/webp"
                     onChange={handleBannerSelect}
                     className="hidden"
                   />

@@ -1,10 +1,13 @@
 import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import { validateSelectedFile, ALLOWED_IMAGE_TYPES } from '../utils/fileValidation';
 import { Bell, Pin, Download, Plus, FileText, Sparkles, X, Trash2, UploadCloud } from 'lucide-react';
 import { NoticeCategory } from '../types';
 
 export const NoticesPage: React.FC = () => {
   const { user, notices, createNotice, deleteNotice } = useAuth();
+  const { showToast } = useToast();
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -26,6 +29,17 @@ export const NoticesPage: React.FC = () => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      const validation = validateSelectedFile(file, {
+        maxSizeMB: 2,
+        pdfMaxSizeMB: 10,
+        allowedTypes: [...ALLOWED_IMAGE_TYPES, 'application/pdf', '.pdf']
+      });
+      if (!validation.valid) {
+        showToast('error', 'সংযুক্তি আপলোড ব্যর্থ', validation.errorMessage || 'ছবি সর্বোচ্চ ২ MB এবং PDF ফাইল সর্বোচ্চ ১০ MB সমর্থিত।');
+        if (e.target) e.target.value = '';
+        return;
+      }
+
       setFileName(file.name);
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -242,7 +256,7 @@ export const NoticesPage: React.FC = () => {
                   <input
                     type="file"
                     ref={fileInputRef}
-                    accept="image/*,.pdf"
+                    accept="image/jpeg,image/jpg,image/png,image/webp,application/pdf,.pdf"
                     onChange={handleFileChange}
                     className="hidden"
                   />

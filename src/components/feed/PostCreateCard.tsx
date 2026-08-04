@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Send, Image, X, Sparkles, MessageSquare, UploadCloud } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { validateSelectedFile, ALLOWED_IMAGE_TYPES } from '../../utils/fileValidation';
 
 export const PostCreateCard: React.FC = () => {
   const { user, createPost } = useAuth();
@@ -33,6 +34,15 @@ export const PostCreateCard: React.FC = () => {
     const filesArray = Array.from(files).slice(0, 4 - imageUrls.length);
 
     filesArray.forEach((file) => {
+      const validation = validateSelectedFile(file, {
+        maxSizeMB: 2,
+        allowedTypes: ALLOWED_IMAGE_TYPES
+      });
+      if (!validation.valid) {
+        showToast('error', 'পোস্ট ছবি অগ্রহণযোগ্য', `${file.name}: ${validation.errorMessage || 'সর্বোচ্চ ২ MB ও JPG, PNG, WEBP ফাইল সমর্থিত।'}`);
+        return;
+      }
+
       const reader = new FileReader();
       reader.onloadend = () => {
         if (reader.result) {
@@ -79,7 +89,7 @@ export const PostCreateCard: React.FC = () => {
           <input
             type="file"
             ref={fileInputRef}
-            accept="image/*"
+            accept="image/jpeg,image/jpg,image/png,image/webp"
             multiple
             onChange={handleFileSelect}
             className="hidden"
