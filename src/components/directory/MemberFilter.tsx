@@ -128,7 +128,7 @@ export const MemberFilter: React.FC<MemberFilterProps> = ({ filters, onFilterCha
             type="text"
             value={filters.session || ''}
             onChange={(e) => onFilterChange({ ...filters, session: e.target.value || undefined })}
-            placeholder="2020-2021"
+            placeholder="যেমন: 2021-2022"
             className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500"
           />
         </div>
