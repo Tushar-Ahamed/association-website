@@ -1,8 +1,9 @@
 import React, { useState, useRef } from 'react';
-import { Send, Image, X, Sparkles, MessageSquare, UploadCloud } from 'lucide-react';
+import { Send, Image, X, Sparkles, MessageSquare, UploadCloud, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { validateSelectedFile, ALLOWED_IMAGE_TYPES } from '../../utils/fileValidation';
+import { compressImage } from '../../utils/imageCompressor';
 
 export const PostCreateCard: React.FC = () => {
   const { user, createPost } = useAuth();
@@ -10,6 +11,7 @@ export const PostCreateCard: React.FC = () => {
 
   const [content, setContent] = useState('');
   const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [isCompressing, setIsCompressing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!user) {
@@ -23,7 +25,7 @@ export const PostCreateCard: React.FC = () => {
     );
   }
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
@@ -32,27 +34,33 @@ export const PostCreateCard: React.FC = () => {
     }
 
     const filesArray = Array.from(files).slice(0, 4 - imageUrls.length);
+    setIsCompressing(true);
 
-    filesArray.forEach((file) => {
-      const validation = validateSelectedFile(file, {
-        maxSizeMB: 2,
-        allowedTypes: ALLOWED_IMAGE_TYPES
-      });
-      if (!validation.valid) {
-        showToast('error', 'পোস্ট ছবি অগ্রহণযোগ্য', `${file.name}: ${validation.errorMessage || 'সর্বোচ্চ ২ MB ও JPG, PNG, WEBP ফাইল সমর্থিত।'}`);
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (reader.result) {
-          setImageUrls((prev) => [...prev, reader.result as string]);
+    try {
+      for (const file of filesArray) {
+        const validation = validateSelectedFile(file, {
+          maxSizeMB: 2,
+          allowedTypes: ALLOWED_IMAGE_TYPES
+        });
+        if (!validation.valid) {
+          showToast('error', 'পোস্ট ছবি অগ্রহণযোগ্য', `${file.name}: ${validation.errorMessage || 'সর্বোচ্চ ২ MB ও JPG, PNG, WEBP ফাইল সমর্থিত।'}`);
+          continue;
         }
-      };
-      reader.readAsDataURL(file);
-    });
 
-    if (fileInputRef.current) fileInputRef.current.value = '';
+        const compressed = await compressImage(file, {
+          maxWidth: 1600,
+          maxHeight: 1600,
+          quality: 0.82,
+          convertToWebP: true
+        });
+        setImageUrls((prev) => [...prev, compressed.dataUrl]);
+      }
+    } catch (err) {
+      showToast('error', 'প্রসেসিং ত্রুটি', 'ছবি প্রক্রিয়াজাতকরণে সমস্যা হয়েছে।');
+    } finally {
+      setIsCompressing(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const handleRemoveImage = (index: number) => {
@@ -116,11 +124,21 @@ export const PostCreateCard: React.FC = () => {
           <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="px-3.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-200 text-xs font-semibold flex items-center gap-2 transition-colors border border-slate-700/60"
+              disabled={isCompressing}
+              onClick={() => !isCompressing && fileInputRef.current?.click()}
+              className="px-3.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-200 text-xs font-semibold flex items-center gap-2 transition-colors border border-slate-700/60 disabled:opacity-50"
             >
-              <UploadCloud className="w-4 h-4 text-emerald-400" />
-              <span>ডিভাইস থেকে ছবি তুলুন / যুক্ত করুন ({imageUrls.length}/4)</span>
+              {isCompressing ? (
+                <>
+                  <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
+                  <span className="text-emerald-400">ছবি সংকুচিত হচ্ছে...</span>
+                </>
+              ) : (
+                <>
+                  <UploadCloud className="w-4 h-4 text-emerald-400" />
+                  <span>ডিভাইস থেকে ছবি তুলুন / যুক্ত করুন ({imageUrls.length}/4)</span>
+                </>
+              )}
             </button>
 
             <button

@@ -2,13 +2,15 @@ import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { validateSelectedFile, ALLOWED_IMAGE_TYPES } from '../utils/fileValidation';
-import { Image, Plus, Trash2, X, UploadCloud } from 'lucide-react';
+import { compressImage } from '../utils/imageCompressor';
+import { Image, Plus, Trash2, X, UploadCloud, Loader2 } from 'lucide-react';
 
 export const GalleryPage: React.FC = () => {
   const { user, gallery, addGalleryItem, deleteGalleryItem } = useAuth();
   const { showToast } = useToast();
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [modalOpen, setModalOpen] = useState(false);
+  const [isCompressing, setIsCompressing] = useState(false);
 
   // Form state
   const [title, setTitle] = useState('');
@@ -24,7 +26,7 @@ export const GalleryPage: React.FC = () => {
     categoryFilter === 'All' ? true : g.category === categoryFilter
   );
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const validation = validateSelectedFile(file, {
@@ -37,13 +39,22 @@ export const GalleryPage: React.FC = () => {
         return;
       }
 
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (reader.result) {
-          setImageUrl(reader.result as string);
-        }
-      };
-      reader.readAsDataURL(file);
+      setIsCompressing(true);
+      try {
+        const compressed = await compressImage(file, {
+          maxWidth: 1600,
+          maxHeight: 1600,
+          quality: 0.82,
+          convertToWebP: true
+        });
+        setImageUrl(compressed.dataUrl);
+        showToast('success', 'গ্যালারি ছবি অপটিমাইজড', 'ছবিটি সংকুচিত ও WebP ফরম্যাটে রূপান্তর করা হয়েছে।');
+      } catch (err) {
+        showToast('error', 'প্রসেসিং ত্রুটি', 'ছবি অপটিমাইজেশনে সমস্যা হয়েছে।');
+      } finally {
+        setIsCompressing(false);
+        if (e.target) e.target.value = '';
+      }
     }
   };
 
@@ -185,10 +196,15 @@ export const GalleryPage: React.FC = () => {
                   />
                   
                   <div
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => !isCompressing && fileInputRef.current?.click()}
                     className="p-5 border-2 border-dashed border-slate-700 hover:border-emerald-500 rounded-2xl bg-slate-950/60 cursor-pointer text-center space-y-2 transition-colors"
                   >
-                    {imageUrl ? (
+                    {isCompressing ? (
+                      <div className="py-6 space-y-2 text-emerald-400">
+                        <Loader2 className="w-8 h-8 text-emerald-400 mx-auto animate-spin" />
+                        <p className="font-semibold text-xs">ছবি অপটিমাইজ ও সংকুচিত করা হচ্ছে...</p>
+                      </div>
+                    ) : imageUrl ? (
                       <div className="relative h-40 rounded-xl overflow-hidden">
                         <img src={imageUrl} alt="Preview" className="w-full h-full object-cover" />
                         <span className="absolute bottom-2 right-2 bg-slate-950/80 px-2 py-1 rounded text-[10px] text-emerald-400 font-bold">

@@ -2,7 +2,8 @@ import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { validateSelectedFile, ALLOWED_IMAGE_TYPES } from '../utils/fileValidation';
-import { Bell, Pin, Download, Plus, FileText, Sparkles, X, Trash2, UploadCloud } from 'lucide-react';
+import { compressImage } from '../utils/imageCompressor';
+import { Bell, Pin, Download, Plus, FileText, Sparkles, X, Trash2, UploadCloud, Loader2 } from 'lucide-react';
 import { NoticeCategory } from '../types';
 
 export const NoticesPage: React.FC = () => {
@@ -10,6 +11,7 @@ export const NoticesPage: React.FC = () => {
   const { showToast } = useToast();
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [modalOpen, setModalOpen] = useState(false);
+  const [isCompressing, setIsCompressing] = useState(false);
 
   // New notice form
   const [title, setTitle] = useState('');
@@ -26,7 +28,7 @@ export const NoticesPage: React.FC = () => {
     activeCategory === 'all' ? true : n.category === activeCategory
   );
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const validation = validateSelectedFile(file, {
@@ -40,14 +42,25 @@ export const NoticesPage: React.FC = () => {
         return;
       }
 
-      setFileName(file.name);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (reader.result) {
-          setFileUrl(reader.result as string);
+      setIsCompressing(true);
+      try {
+        const compressed = await compressImage(file, {
+          maxWidth: 1600,
+          maxHeight: 1600,
+          quality: 0.82,
+          convertToWebP: true
+        });
+        setFileName(file.name);
+        setFileUrl(compressed.dataUrl);
+        if (file.type.startsWith('image/')) {
+          showToast('success', 'ছবি অপটিমাইজড', 'সংযুক্তি ছবিটি অপটিমাইজ ও সংকুচিত করা হয়েছে।');
         }
-      };
-      reader.readAsDataURL(file);
+      } catch (err) {
+        showToast('error', 'প্রসেসিং ত্রুটি', 'ফাইল প্রক্রিয়াজাতকরণে ব্যর্থতা।');
+      } finally {
+        setIsCompressing(false);
+        if (e.target) e.target.value = '';
+      }
     }
   };
 
@@ -261,10 +274,15 @@ export const NoticesPage: React.FC = () => {
                     className="hidden"
                   />
                   <div
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => !isCompressing && fileInputRef.current?.click()}
                     className="p-3.5 border border-dashed border-slate-700 hover:border-emerald-500 rounded-xl bg-slate-950/60 cursor-pointer text-center space-y-1 transition-colors"
                   >
-                    {fileName ? (
+                    {isCompressing ? (
+                      <div className="flex items-center justify-center gap-2 text-emerald-400">
+                        <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
+                        <span className="font-semibold text-xs">ফাইল অপটিমাইজ করা হচ্ছে...</span>
+                      </div>
+                    ) : fileName ? (
                       <p className="font-bold text-emerald-400">সংযুক্তি ফাইল: {fileName}</p>
                     ) : (
                       <div className="flex items-center justify-center gap-2 text-slate-400">

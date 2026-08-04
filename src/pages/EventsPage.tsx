@@ -2,13 +2,15 @@ import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { validateSelectedFile, ALLOWED_IMAGE_TYPES } from '../utils/fileValidation';
-import { Calendar, MapPin, Plus, X, Sparkles, CheckCircle2, Trash2, UploadCloud } from 'lucide-react';
+import { compressImage } from '../utils/imageCompressor';
+import { Calendar, MapPin, Plus, X, Sparkles, CheckCircle2, Trash2, UploadCloud, Loader2 } from 'lucide-react';
 
 export const EventsPage: React.FC = () => {
   const { user, events, createEvent, deleteEvent } = useAuth();
   const { showToast } = useToast();
   const [modalOpen, setModalOpen] = useState(false);
   const [registeredEvents, setRegisteredEvents] = useState<Record<string, boolean>>({});
+  const [isCompressing, setIsCompressing] = useState(false);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -19,7 +21,7 @@ export const EventsPage: React.FC = () => {
 
   const canManageEvents = user?.role === 'super_admin' || user?.role === 'committee_member' || user?.role === 'upazila_admin';
 
-  const handleBannerSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBannerSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const validation = validateSelectedFile(file, {
@@ -32,13 +34,22 @@ export const EventsPage: React.FC = () => {
         return;
       }
 
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (reader.result) {
-          setBannerUrl(reader.result as string);
-        }
-      };
-      reader.readAsDataURL(file);
+      setIsCompressing(true);
+      try {
+        const compressed = await compressImage(file, {
+          maxWidth: 1920,
+          maxHeight: 1080,
+          quality: 0.85,
+          convertToWebP: true
+        });
+        setBannerUrl(compressed.dataUrl);
+        showToast('success', 'ইভেন্ট ব্যানার অপটিমাইজড', 'ব্যানার ছবিটি সংকুচিত ও WebP ফরম্যাটে রূপান্তর করা হয়েছে।');
+      } catch (err) {
+        showToast('error', 'প্রসেসিং ত্রুটি', 'ব্যানার প্রক্রিয়াজাতকরণে সমস্যা হয়েছে।');
+      } finally {
+        setIsCompressing(false);
+        if (e.target) e.target.value = '';
+      }
     }
   };
 
@@ -225,10 +236,15 @@ export const EventsPage: React.FC = () => {
                     className="hidden"
                   />
                   <div
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => !isCompressing && fileInputRef.current?.click()}
                     className="p-4 border-2 border-dashed border-slate-700 hover:border-emerald-500 rounded-2xl bg-slate-950/60 cursor-pointer text-center space-y-2 transition-colors"
                   >
-                    {bannerUrl ? (
+                    {isCompressing ? (
+                      <div className="py-4 text-emerald-400 flex items-center justify-center gap-2">
+                        <Loader2 className="w-5 h-5 text-emerald-400 animate-spin" />
+                        <span className="font-semibold text-xs">ব্যানার ছবি অপটিমাইজ ও সংকুচিত করা হচ্ছে...</span>
+                      </div>
+                    ) : bannerUrl ? (
                       <div className="relative h-32 rounded-xl overflow-hidden">
                         <img src={bannerUrl} alt="Banner Preview" className="w-full h-full object-cover" />
                         <span className="absolute bottom-2 right-2 bg-slate-950/80 px-2 py-1 rounded text-[10px] text-emerald-400 font-bold">

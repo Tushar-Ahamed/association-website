@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { validateSelectedFile, ALLOWED_IMAGE_TYPES } from '../utils/fileValidation';
-import { User, Mail, Phone, MapPin, GraduationCap, Building2, Save, ShieldCheck, Camera, Sparkles, Award, Briefcase, Heart, UploadCloud } from 'lucide-react';
+import { compressImage } from '../utils/imageCompressor';
+import { User, Mail, Phone, MapPin, GraduationCap, Building2, Save, ShieldCheck, Camera, Sparkles, Award, Briefcase, Heart, UploadCloud, Loader2 } from 'lucide-react';
 import { UpazilaName } from '../types';
 import { UPAZILA_INFO } from '../data/mockData';
 import { RU_HALLS, RU_DEPARTMENTS } from '../data/ruData';
@@ -10,6 +11,7 @@ import { RU_HALLS, RU_DEPARTMENTS } from '../data/ruData';
 export const ProfilePage: React.FC = () => {
   const { user, updateProfile } = useAuth();
   const { showToast } = useToast();
+  const [isCompressingAvatar, setIsCompressingAvatar] = useState(false);
 
   if (!user) {
     return (
@@ -290,7 +292,8 @@ export const ProfilePage: React.FC = () => {
                     type="file"
                     id="profileAvatarPicker"
                     accept="image/jpeg,image/jpg,image/png,image/webp"
-                    onChange={(e) => {
+                    disabled={isCompressingAvatar}
+                    onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (file) {
                         const validation = validateSelectedFile(file, {
@@ -302,23 +305,36 @@ export const ProfilePage: React.FC = () => {
                           if (e.target) e.target.value = '';
                           return;
                         }
-                        const reader = new FileReader();
-                        reader.onloadend = () => {
-                          if (reader.result) {
-                            setAvatarUrl(reader.result as string);
-                          }
-                        };
-                        reader.readAsDataURL(file);
+                        setIsCompressingAvatar(true);
+                        try {
+                          const compressed = await compressImage(file, { maxWidth: 600, maxHeight: 600, quality: 0.82, convertToWebP: true });
+                          setAvatarUrl(compressed.dataUrl);
+                          showToast('success', 'ছবি অপটিমাইজেশন সম্পন্ন', `ছবিটি অপটিমাইজ করে WebP ফরম্যাটে রূপান্তর করা হয়েছে।`);
+                        } catch (err) {
+                          showToast('error', 'প্রসেসিং ত্রুটি', 'ছবি প্রক্রিয়াজাতকরণ ব্যর্থ হয়েছে।');
+                        } finally {
+                          setIsCompressingAvatar(false);
+                          if (e.target) e.target.value = '';
+                        }
                       }
                     }}
                     className="hidden"
                   />
                   <div
-                    onClick={() => document.getElementById('profileAvatarPicker')?.click()}
+                    onClick={() => !isCompressingAvatar && document.getElementById('profileAvatarPicker')?.click()}
                     className="p-3 border border-dashed border-slate-700 hover:border-emerald-500 rounded-xl bg-slate-950/60 cursor-pointer text-center space-y-1 transition-colors flex items-center justify-center gap-2 text-slate-300"
                   >
-                    <UploadCloud className="w-4 h-4 text-emerald-400" />
-                    <span className="font-semibold text-xs">গ্যালারি / ক্যামেরা থেকে ছবি পরিবর্তন করুন</span>
+                    {isCompressingAvatar ? (
+                      <>
+                        <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
+                        <span className="font-semibold text-xs text-emerald-400">ছবি সংকুচিত ও WebP ফরম্যাটে রূপান্তর হচ্ছে...</span>
+                      </>
+                    ) : (
+                      <>
+                        <UploadCloud className="w-4 h-4 text-emerald-400" />
+                        <span className="font-semibold text-xs">গ্যালারি / ক্যামেরা থেকে ছবি পরিবর্তন করুন</span>
+                      </>
+                    )}
                   </div>
                 </div>
 
