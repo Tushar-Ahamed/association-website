@@ -43,6 +43,7 @@ import {
 
 interface AuthContextType {
   user: UserProfile | null;
+  isAuthLoading: boolean;
   profiles: UserProfile[];
   committees: Committee[];
   committeeMembers: CommitteeMember[];
@@ -55,7 +56,7 @@ interface AuthContextType {
   contactMessages: ContactMessage[];
   
   // Auth actions
-  login: (email: string, role?: UserRole) => Promise<boolean> | boolean;
+  login: (email: string, password?: string) => Promise<boolean>;
   register: (profileData: Partial<UserProfile> & { password?: string }) => Promise<{ success: boolean; message: string }>;
   logout: () => void;
   switchRoleDemo: (profileId: string) => void;
@@ -108,11 +109,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
-    const savedId = localStorage.getItem('jzs_current_user_id');
-    if (!savedId || savedId === 'visitor') return null;
-    const found = profiles.find((p) => p.id === savedId);
-    return found || null;
+    try {
+      const cachedUser = localStorage.getItem('jzs_current_user_data');
+      if (cachedUser) {
+        return JSON.parse(cachedUser);
+      }
+      const savedId = localStorage.getItem('jzs_current_user_id');
+      if (!savedId || savedId === 'visitor') return null;
+      return INITIAL_PROFILES.find((p) => p.id === savedId) || null;
+    } catch {
+      return null;
+    }
   });
 
   const [committees, setCommittees] = useState<Committee[]>(() => {
@@ -199,18 +209,115 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => { isMounted = false; };
   }, []);
 
-  // Sync state to local storage cache
+  // Supabase Auth session restoration and state synchronization listener
+  useEffect(() => {
+    let isMounted = true;
+
+    const initializeAuthSession = async () => {
+      try {
+        if (isSupabaseConfigured && supabase) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user && isMounted) {
+            const userEmail = session.user.email?.toLowerCase();
+            const userId = session.user.id;
+
+            let matchingProfile = profiles.find(
+              (p) => p.id === userId || p.email.toLowerCase() === userEmail
+            );
+
+            if (!matchingProfile) {
+              const { data: dbProf } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('email', userEmail)
+                .maybeSingle();
+
+              if (dbProf && isMounted) {
+                matchingProfile = dbProf as UserProfile;
+                setProfiles((prev) => [matchingProfile!, ...prev]);
+              }
+            }
+
+            if (matchingProfile && isMounted) {
+              setCurrentUser(matchingProfile);
+              localStorage.setItem('jzs_current_user_id', matchingProfile.id);
+              localStorage.setItem('jzs_current_user_data', JSON.stringify(matchingProfile));
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Auth session initialization notice:', error);
+      } finally {
+        if (isMounted) {
+          setIsAuthLoading(false);
+        }
+      }
+    };
+
+    initializeAuthSession();
+
+    if (isSupabaseConfigured && supabase) {
+      const client = supabase;
+      const { data: authListener } = client.auth.onAuthStateChange(async (event, session) => {
+        if (!isMounted) return;
+
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+          if (session?.user) {
+            const userEmail = session.user.email?.toLowerCase();
+            const userId = session.user.id;
+            let matchingProfile = profiles.find(
+              (p) => p.id === userId || p.email.toLowerCase() === userEmail
+            );
+            if (!matchingProfile) {
+              const { data: dbProf } = await client
+                .from('profiles')
+                .select('*')
+                .eq('email', userEmail)
+                .maybeSingle();
+              if (dbProf && isMounted) {
+                matchingProfile = dbProf as UserProfile;
+                setProfiles((prev) => [matchingProfile!, ...prev]);
+              }
+            }
+            if (matchingProfile && isMounted) {
+              setCurrentUser(matchingProfile);
+              localStorage.setItem('jzs_current_user_id', matchingProfile.id);
+              localStorage.setItem('jzs_current_user_data', JSON.stringify(matchingProfile));
+            }
+          }
+        } else if (event === 'SIGNED_OUT') {
+          setCurrentUser(null);
+          localStorage.removeItem('jzs_current_user_id');
+          localStorage.removeItem('jzs_current_user_data');
+        }
+      });
+
+      return () => {
+        isMounted = false;
+        authListener?.subscription.unsubscribe();
+      };
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Sync state to local storage cache (only after auth initialization completes)
   useEffect(() => {
     localStorage.setItem('jzs_profiles', JSON.stringify(profiles));
   }, [profiles]);
 
   useEffect(() => {
+    if (isAuthLoading) return;
     if (currentUser) {
       localStorage.setItem('jzs_current_user_id', currentUser.id);
+      localStorage.setItem('jzs_current_user_data', JSON.stringify(currentUser));
     } else {
-      localStorage.setItem('jzs_current_user_id', 'visitor');
+      localStorage.removeItem('jzs_current_user_id');
+      localStorage.removeItem('jzs_current_user_data');
     }
-  }, [currentUser]);
+  }, [currentUser, isAuthLoading]);
 
   useEffect(() => {
     localStorage.setItem('jzs_committees', JSON.stringify(committees));
@@ -261,8 +368,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const login = async (email: string): Promise<boolean> => {
+  const login = async (email: string, password?: string): Promise<boolean> => {
     const cleanEmail = email.trim().toLowerCase();
+
+    if (isSupabaseConfigured && supabase && password) {
+      try {
+        const { error: authErr } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: password
+        });
+        if (authErr) {
+          console.warn('Supabase signInWithPassword notice:', authErr.message);
+        }
+      } catch (err) {
+        console.warn('Supabase auth exception:', err);
+      }
+    }
+
     let found = profiles.find((p) => p.email.trim().toLowerCase() === cleanEmail);
 
     if (!found && isSupabaseConfigured && supabase) {
@@ -293,6 +415,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return false;
     }
     setCurrentUser(found);
+    localStorage.setItem('jzs_current_user_id', found.id);
+    localStorage.setItem('jzs_current_user_data', JSON.stringify(found));
     showToast('success', 'স্বাগতম!', `${found.full_name_bn} হিসেবে সফলভাবে লগইন করেছেন।`);
     addAuditLog('USER_LOGIN', { user_id: found.id, email: found.email });
     return true;
@@ -394,10 +518,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   };
 
-  const logout = () => {
+  const logout = async () => {
     setCurrentUser(null);
+    localStorage.removeItem('jzs_current_user_id');
+    localStorage.removeItem('jzs_current_user_data');
     if (isSupabaseConfigured && supabase) {
-      supabase.auth.signOut().then();
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.warn('Error signing out of Supabase:', err);
+      }
     }
     showToast('info', 'লগআউট সম্পন্ন', 'আপনি সফলভাবে লগআউট করেছেন।');
   };
@@ -821,6 +951,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider
       value={{
         user: currentUser,
+        isAuthLoading,
         profiles,
         committees,
         committeeMembers,

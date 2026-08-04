@@ -6,7 +6,14 @@ const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey);
 
 export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseKey)
+  ? createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        storage: window.localStorage
+      }
+    })
   : null;
 
 // Helper to check live Supabase or fallback

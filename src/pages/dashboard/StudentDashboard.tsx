@@ -5,7 +5,15 @@ import { Link } from 'react-router-dom';
 import { UPAZILA_INFO } from '../../data/mockData';
 
 export const StudentDashboard: React.FC = () => {
-  const { user, notices, events } = useAuth();
+  const { user, isAuthLoading, notices, events } = useAuth();
+
+  if (isAuthLoading) {
+    return (
+      <div className="py-20 flex items-center justify-center bg-slate-950 min-h-screen">
+        <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   if (!user) {
     return (

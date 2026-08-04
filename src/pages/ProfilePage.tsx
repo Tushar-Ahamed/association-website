@@ -9,9 +9,17 @@ import { UPAZILA_INFO } from '../data/mockData';
 import { RU_HALLS, RU_DEPARTMENTS } from '../data/ruData';
 
 export const ProfilePage: React.FC = () => {
-  const { user, updateProfile } = useAuth();
+  const { user, isAuthLoading, updateProfile } = useAuth();
   const { showToast } = useToast();
   const [isCompressingAvatar, setIsCompressingAvatar] = useState(false);
+
+  if (isAuthLoading) {
+    return (
+      <div className="py-20 flex items-center justify-center bg-slate-950 min-h-screen">
+        <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   if (!user) {
     return (

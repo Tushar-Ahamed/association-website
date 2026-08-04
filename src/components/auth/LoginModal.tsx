@@ -29,7 +29,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSwitc
       return;
     }
 
-    const success = await login(email);
+    const success = await login(email, password);
     if (success) {
       onClose();
     }

@@ -4,11 +4,19 @@ import { Bell, BookOpen, Users, Plus, Award, CheckCircle2 } from 'lucide-react';
 import { UPAZILA_INFO } from '../../data/mockData';
 
 export const TeacherDashboard: React.FC = () => {
-  const { user, notices, createNotice, profiles } = useAuth();
+  const { user, isAuthLoading, notices, createNotice, profiles } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
 
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+
+  if (isAuthLoading) {
+    return (
+      <div className="py-20 flex items-center justify-center bg-slate-950 min-h-screen">
+        <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   if (user?.role !== 'teacher' && user?.role !== 'super_admin') {
     return (
