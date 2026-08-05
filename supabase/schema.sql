@@ -224,25 +224,80 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- AUTH TRIGGER
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  v_role public.user_role := 'student'::public.user_role;
+  v_upazila public.upazila_name := 'jhenaidah_sadar'::public.upazila_name;
+  v_status public.account_status := 'approved'::public.account_status;
 BEGIN
-  INSERT INTO public.profiles (
-    id, email, full_name_bn, full_name_en, role, account_status, upazila, department, session_years
-  )
-  VALUES (
-    NEW.id::text,
-    NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'full_name_bn', 'ব্যবহারকারী'),
-    COALESCE(NEW.raw_user_meta_data->>'full_name_en', 'User'),
-    COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'student'::user_role),
-    'approved'::account_status,
-    COALESCE((NEW.raw_user_meta_data->>'upazila')::upazila_name, 'jhenaidah_sadar'::upazila_name),
-    COALESCE(NEW.raw_user_meta_data->>'department', 'সাধারণ'),
-    COALESCE(NEW.raw_user_meta_data->>'session_years', '2023-2024')
-  )
-  ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email;
+  BEGIN
+    IF NEW.raw_user_meta_data->>'role' IS NOT NULL THEN
+      v_role := (NEW.raw_user_meta_data->>'role')::public.user_role;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_role := 'student'::public.user_role;
+  END;
+
+  BEGIN
+    IF NEW.raw_user_meta_data->>'upazila' IS NOT NULL THEN
+      v_upazila := (NEW.raw_user_meta_data->>'upazila')::public.upazila_name;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_upazila := 'jhenaidah_sadar'::public.upazila_name;
+  END;
+
+  BEGIN
+    IF NEW.raw_user_meta_data->>'account_status' IS NOT NULL THEN
+      v_status := (NEW.raw_user_meta_data->>'account_status')::public.account_status;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_status := 'approved'::public.account_status;
+  END;
+
+  BEGIN
+    INSERT INTO public.profiles (
+      id,
+      email,
+      full_name_bn,
+      full_name_en,
+      role,
+      account_status,
+      upazila,
+      department,
+      session_years,
+      phone,
+      student_id,
+      hall_name,
+      blood_group,
+      occupation
+    )
+    VALUES (
+      NEW.id::text,
+      NEW.email,
+      COALESCE(NEW.raw_user_meta_data->>'full_name_bn', 'নিবন্ধিত সদস্য'),
+      COALESCE(NEW.raw_user_meta_data->>'full_name_en', 'Registered Member'),
+      v_role,
+      v_status,
+      v_upazila,
+      COALESCE(NEW.raw_user_meta_data->>'department', 'সাধারণ'),
+      COALESCE(NEW.raw_user_meta_data->>'session_years', '2023-2024'),
+      COALESCE(NEW.raw_user_meta_data->>'phone', ''),
+      NEW.raw_user_meta_data->>'student_id',
+      NEW.raw_user_meta_data->>'hall_name',
+      NEW.raw_user_meta_data->>'blood_group',
+      NEW.raw_user_meta_data->>'occupation'
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      email = EXCLUDED.email,
+      full_name_bn = EXCLUDED.full_name_bn,
+      full_name_en = EXCLUDED.full_name_en,
+      updated_at = NOW();
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'handle_new_user exception: %', SQLERRM;
+  END;
+
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created

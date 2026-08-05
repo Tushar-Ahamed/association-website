@@ -77,6 +77,8 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({ isOpen, onClose, o
         isTeacher: role === 'teacher',
         message: res.message
       });
+    } else {
+      setPasswordError(res.message);
     }
   };
 

@@ -192,11 +192,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!isMounted) return;
 
         if (dbProf && dbProf.length > 0) {
-          setProfiles((prev) => {
+          setProfiles(() => {
             const merged = [...(dbProf as UserProfile[])];
-            prev.forEach((p) => {
-              if (!merged.some((m) => m.id === p.id || m.email.toLowerCase() === p.email.toLowerCase())) {
-                merged.push(p);
+            INITIAL_PROFILES.forEach((initP) => {
+              if (!merged.some((p) => p.email.trim().toLowerCase() === initP.email.trim().toLowerCase())) {
+                merged.push(initP);
               }
             });
             return merged;
@@ -444,15 +444,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (isSupabaseConfigured && supabase && password) {
       try {
-        const { error: authErr } = await supabase.auth.signInWithPassword({
+        const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
           email: cleanEmail,
           password: password
         });
         if (authErr) {
-          console.warn('Supabase signInWithPassword notice:', authErr.message);
+          console.warn('Supabase signInWithPassword error:', authErr.message);
+          showToast('error', 'লগইন ব্যর্থ', authErr.message === 'Invalid login credentials' ? 'ভুল ইমেইল বা পাসওয়ার্ড!' : authErr.message);
+          return false;
         }
-      } catch (err) {
+      } catch (err: any) {
         console.warn('Supabase auth exception:', err);
+        showToast('error', 'লগইন ত্রুটি', err?.message || 'লগইন করার সময় একটি সমস্যা হয়েছে।');
+        return false;
       }
     }
 
@@ -516,43 +520,126 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Supabase Auth Integration
     if (isSupabaseConfigured && supabase) {
-      try {
-        const userPassword = profileData.password || 'Password123!';
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email: profileData.email || '',
-          password: userPassword,
-          options: {
-            data: {
-              full_name_bn: profileData.full_name_bn,
-              full_name_en: profileData.full_name_en,
-              role: assignedRole,
-              upazila: profileData.upazila,
-              department: profileData.department,
-              session_years: profileData.session_years
-            }
-          }
-        });
-        if (!authError && authData.user?.id) {
-          generatedId = authData.user.id;
-        }
+      const userPassword = profileData.password || 'Password123!';
+      
+      console.log('🔄 [Supabase Debug] Executing supabase.auth.signUp() for:', emailLower);
 
-        // Establish active session if not auto-signed-in (enables RLS check auth.uid())
-        if (!authData.session) {
-          await supabase.auth.signInWithPassword({
-            email: profileData.email || '',
-            password: userPassword
-          });
+      // 1. Register user with Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: emailLower,
+        password: userPassword,
+        options: {
+          data: {
+            full_name_bn: profileData.full_name_bn || 'নতুন ব্যবহারকারী',
+            full_name_en: profileData.full_name_en || profileData.full_name_bn || 'New User',
+            role: assignedRole,
+            account_status: assignedStatus,
+            upazila: profileData.upazila || 'jhenaidah_sadar',
+            department: profileData.department || 'সাধারণ',
+            session_years: profileData.session_years || '2023-2024',
+            phone: profileData.phone || '',
+            student_id: profileData.student_id || '',
+            hall_name: profileData.hall_name || '',
+            blood_group: profileData.blood_group || '',
+            occupation: isSuperAdminEmail ? 'সেন্ট্রাল এডমিন' : (profileData.occupation || '')
+          }
         }
-      } catch (e) {
-        console.warn('Supabase Auth warning during signup:', e);
+      });
+
+      console.log('📌 [Supabase Debug] signUp() complete result:', {
+        'data.user': authData?.user,
+        'data.session': authData?.session,
+        'error': authError
+      });
+
+      if (authError) {
+        console.error('❌ [Supabase Auth Error]:', authError);
+        const errMsg = authError.message || authError.name || 'Supabase Auth Error';
+        showToast('error', 'নিবন্ধন ব্যর্থ (Supabase Auth)', errMsg);
+        return { success: false, message: `Supabase Auth error: ${errMsg}` };
       }
+
+      if (!authData.user || !authData.user.id) {
+        console.error('❌ [Supabase Auth Error] No user returned. authData:', authData);
+        showToast('error', 'নিবন্ধন ব্যর্থ', 'Supabase ব্যবহারকারী তৈরি করতে ব্যর্থ হয়েছে।');
+        return { success: false, message: 'Supabase Auth did not return a valid user.' };
+      }
+
+      generatedId = authData.user.id;
+
+      // 2. Establish session if not automatically signed in
+      if (!authData.session) {
+        const { error: signInErr } = await supabase.auth.signInWithPassword({
+          email: emailLower,
+          password: userPassword
+        });
+        if (signInErr) {
+          console.warn('Notice establishing Supabase session after signup:', signInErr.message);
+        }
+      }
+
+      // 3. Create full profile record in Supabase profiles table
+      const newProfile: UserProfile = {
+        id: generatedId,
+        email: emailLower,
+        full_name_bn: profileData.full_name_bn || 'নতুন ব্যবহারকারী',
+        full_name_en: profileData.full_name_en || profileData.full_name_bn || 'New User',
+        phone: profileData.phone || '',
+        avatar_url: profileData.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(profileData.full_name_en || 'User')}`,
+        role: assignedRole,
+        account_status: assignedStatus,
+        upazila: profileData.upazila || 'jhenaidah_sadar',
+        department: profileData.department || 'সাধারণ',
+        session_years: profileData.session_years || '2023-2024',
+        passing_year: profileData.passing_year,
+        student_id: profileData.student_id,
+        hall_name: profileData.hall_name,
+        blood_group: profileData.blood_group,
+        occupation: isSuperAdminEmail ? 'সেন্ট্রাল এডমিন' : profileData.occupation,
+        organization: profileData.organization,
+        bio: profileData.bio,
+        facebook_url: profileData.facebook_url,
+        linkedin_url: profileData.linkedin_url,
+        is_verified: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      const { error: dbErr } = await supabase.from('profiles').upsert(newProfile, { onConflict: 'id' });
+      if (dbErr) {
+        console.error('❌ Supabase profile insertion error:', dbErr.message);
+        showToast('error', 'প্রোফাইল তথ্য সংরক্ষণ ব্যর্থ', dbErr.message);
+        return { success: false, message: `ডাটাবেস ত্রুটি: ${dbErr.message}` };
+      }
+
+      console.log('✅ Supabase profile successfully created and saved to cloud DB:', newProfile.email);
+
+      setProfiles((prev) => [newProfile, ...prev.filter((p) => p.id !== newProfile.id)]);
+
+      if (assignedStatus === 'approved') {
+        setCurrentUser(newProfile);
+        showToast('success', isSuperAdminEmail ? 'সুপার এডমিন অ্যাকাউন্ট সক্রিয়' : 'নিবন্ধন সফল', 
+          isSuperAdminEmail ? 'আপনি সেন্ট্রাল সুপার এডমিন হিসেবে নিবন্ধিত ও সক্রিয় হয়েছেন।' : 'আপনার অ্যাকাউন্ট সফলভাবে তৈরি ও সক্রিয় হয়েছে।');
+      } else {
+        showToast('info', 'নিবন্ধন গৃহীত হয়েছে', 'শিক্ষক অ্যাকাউন্টের জন্য আপনার আবেদন সুপার এডমিনের অনুমোদনের অপেক্ষায় রয়েছে।');
+      }
+
+      addAuditLog('USER_REGISTER', { email: newProfile.email, role: newProfile.role, status: newProfile.account_status });
+
+      return { 
+        success: true, 
+        message: isTeacher 
+          ? 'নিবন্ধন সম্পন্ন হয়েছে! শিক্ষক হিসেবে আপনার অ্যাকাউন্টটি এডমিন অনুমোদনের পর সক্রিয় হবে।' 
+          : 'সফলভাবে নিবন্ধিত এবং Supabase সিস্টেমে অ্যাকাউন্ট তৈরি সম্পন্ন হয়েছে!' 
+      };
     }
 
-    const newProfile: UserProfile = {
+    // Offline / Unconfigured fallback only when Supabase is not available
+    const fallbackProfile: UserProfile = {
       id: generatedId,
-      email: profileData.email || '',
+      email: emailLower,
       full_name_bn: profileData.full_name_bn || 'নতুন ব্যবহারকারী',
-      full_name_en: profileData.full_name_en || 'New User',
+      full_name_en: profileData.full_name_en || profileData.full_name_bn || 'New User',
       phone: profileData.phone || '',
       avatar_url: profileData.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(profileData.full_name_en || 'User')}`,
       role: assignedRole,
@@ -574,36 +661,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updated_at: new Date().toISOString()
     };
 
-    setProfiles((prev) => [newProfile, ...prev.filter((p) => p.id !== newProfile.id)]);
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { error: dbErr } = await supabase.from('profiles').upsert(newProfile, { onConflict: 'id' });
-        if (dbErr) {
-          console.error('❌ Supabase profile insertion error:', dbErr.message);
-        } else {
-          console.log('✅ Supabase profile successfully saved to cloud DB:', newProfile.email);
-        }
-      } catch (err) {
-        console.error('❌ Exception inserting profile into Supabase DB:', err);
-      }
-    }
+    setProfiles((prev) => [fallbackProfile, ...prev.filter((p) => p.id !== fallbackProfile.id)]);
 
     if (assignedStatus === 'approved') {
-      setCurrentUser(newProfile);
-      showToast('success', isSuperAdminEmail ? 'সুপার এডমিন অ্যাকাউন্ট সক্রিয়' : 'নিবন্ধন সফল', 
-        isSuperAdminEmail ? 'আপনি সেন্ট্রাল সুপার এডমিন হিসেবে নিবন্ধিত ও সক্রিয় হয়েছেন।' : 'আপনার ইমেইল যাচাই সম্পন্ন হয়েছে এবং অ্যাকাউন্ট সক্রিয় করা হয়েছে।');
+      setCurrentUser(fallbackProfile);
+      showToast('success', 'নিবন্ধন সফল (অফলাইন)', 'অফলাইন মোডে নিবন্ধন সম্পন্ন হয়েছে।');
     } else {
-      showToast('info', 'নিবন্ধন গৃহীত হয়েছে', 'শিক্ষক অ্যাকাউন্টের জন্য আপনার আবেদন সুপার এডমিনের অনুমোদনের অপেক্ষায় রয়েছে।');
+      showToast('info', 'নিবন্ধন গৃহীত হয়েছে', 'শিক্ষক অ্যাকাউন্টের আবেদন অপেক্ষমাণ।');
     }
 
-    addAuditLog('USER_REGISTER', { email: newProfile.email, role: newProfile.role, status: newProfile.account_status });
+    addAuditLog('USER_REGISTER', { email: fallbackProfile.email, role: fallbackProfile.role, status: fallbackProfile.account_status });
 
     return { 
       success: true, 
-      message: isTeacher 
-        ? 'নিবন্ধন সম্পন্ন হয়েছে! শিক্ষক হিসেবে আপনার অ্যাকাউন্টটি এডমিন অনুমোদনের পর সক্রিয় হবে।' 
-        : 'সফলভাবে নিবন্ধিত এবং ইমেইল যাচাইকৃত হয়েছে!' 
+      message: 'অফলাইন সিমুলেটেড নিবন্ধন সম্পন্ন হয়েছে।' 
     };
   };
 
