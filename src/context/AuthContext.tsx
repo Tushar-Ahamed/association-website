@@ -567,18 +567,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       generatedId = authData.user.id;
 
-      // 2. Establish session if not automatically signed in
-      if (!authData.session) {
-        const { error: signInErr } = await supabase.auth.signInWithPassword({
-          email: emailLower,
-          password: userPassword
-        });
-        if (signInErr) {
-          console.warn('Notice establishing Supabase session after signup:', signInErr.message);
-        }
-      }
-
-      // 3. Create full profile record in Supabase profiles table
+      // 2. Construct profile representation for local React state
       const newProfile: UserProfile = {
         id: generatedId,
         email: emailLower,
@@ -605,21 +594,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updated_at: new Date().toISOString()
       };
 
-      const { error: dbErr } = await supabase.from('profiles').upsert(newProfile, { onConflict: 'id' });
-      if (dbErr) {
-        console.error('❌ Supabase profile insertion error:', dbErr.message);
-        showToast('error', 'প্রোফাইল তথ্য সংরক্ষণ ব্যর্থ', dbErr.message);
-        return { success: false, message: `ডাটাবেস ত্রুটি: ${dbErr.message}` };
-      }
-
-      console.log('✅ Supabase profile successfully created and saved to cloud DB:', newProfile.email);
+      console.log('✅ Supabase Auth user created successfully. DB trigger handle_new_user() creates profile row for:', newProfile.email);
 
       setProfiles((prev) => [newProfile, ...prev.filter((p) => p.id !== newProfile.id)]);
 
       if (assignedStatus === 'approved') {
-        setCurrentUser(newProfile);
-        showToast('success', isSuperAdminEmail ? 'সুপার এডমিন অ্যাকাউন্ট সক্রিয়' : 'নিবন্ধন সফল', 
-          isSuperAdminEmail ? 'আপনি সেন্ট্রাল সুপার এডমিন হিসেবে নিবন্ধিত ও সক্রিয় হয়েছেন।' : 'আপনার অ্যাকাউন্ট সফলভাবে তৈরি ও সক্রিয় হয়েছে।');
+        if (authData.session) {
+          setCurrentUser(newProfile);
+        }
+        showToast(
+          'success', 
+          isSuperAdminEmail ? 'সুপার এডমিন অ্যাকাউন্ট সক্রিয়' : 'নিবন্ধন আবেদন সফল', 
+          isSuperAdminEmail 
+            ? 'আপনি সেন্ট্রাল সুপার এডমিন হিসেবে নিবন্ধিত হয়েছেন।' 
+            : 'আপনার অ্যাকাউন্ট তৈরি হয়েছে। আপনার ইমেইল ইনবক্সে পাঠানো যাচাইকরণ লিঙ্কে ক্লিক করুন।'
+        );
       } else {
         showToast('info', 'নিবন্ধন গৃহীত হয়েছে', 'শিক্ষক অ্যাকাউন্টের জন্য আপনার আবেদন সুপার এডমিনের অনুমোদনের অপেক্ষায় রয়েছে।');
       }
@@ -630,7 +619,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         success: true, 
         message: isTeacher 
           ? 'নিবন্ধন সম্পন্ন হয়েছে! শিক্ষক হিসেবে আপনার অ্যাকাউন্টটি এডমিন অনুমোদনের পর সক্রিয় হবে।' 
-          : 'সফলভাবে নিবন্ধিত এবং Supabase সিস্টেমে অ্যাকাউন্ট তৈরি সম্পন্ন হয়েছে!' 
+          : 'সফলভাবে নিবন্ধিত এবং ইমেইল নিশ্চিতকরণ পাঠানো হয়েছে। অনুগ্রহ করে ইমেইল ইনবক্স চেক করুন।' 
       };
     }
 
